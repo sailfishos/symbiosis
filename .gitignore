@@ -1,0 +1,5 @@
+/.cargo/config
+/cargo-home/
+*.list
+/target/
+/vendor/

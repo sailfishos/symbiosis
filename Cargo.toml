@@ -1,0 +1,24 @@
+[package]
+name = "symbiosis"
+version = "0.1.0"
+license = "BSD-3-Clause"
+edition = "2021"
+# Sailfish 5.2 comes with 1.75.0
+rust-version = "1.75.0"
+publish = false
+
+[dependencies]
+async-trait = "0.1.89"
+ciborium = "0.2.2"
+crc32fast = "1.5.0"
+libc = "0.2.186"
+log = "0.4.33"
+packed_struct = "0.10.1"
+serde = "1.0"
+systemd-journal-logger = "2.2.2"
+tokio = { version = "1.52.3", features = ["full"] }
+zbus = { version = "4.4.0", default-features = false, features = ["tokio"] }
+zvariant = "4.2.0"
+
+[profile.release]
+strip = "symbols"

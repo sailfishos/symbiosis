@@ -1,0 +1,56 @@
+// Copyright (c) 2026 Jolla Mobile Ltd
+
+//! I²C device.
+
+use std::fs::File;
+use std::io::{Error, Read, Result, Write};
+use std::os::fd::AsRawFd;
+use std::path::Path;
+
+use libc::{self, ioctl};
+
+/// Use i2c-dev driver to talk with I²C bus.
+pub struct I2CDev {
+    file: File,
+}
+
+impl I2CDev {
+    /// Create new instance for path.
+    ///
+    /// The path should be a device file like "/dev/i2c-0".
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        // TODO: This should check that the file is for the correct type of device.
+        Ok(Self {
+            file: File::options().read(true).write(true).open(path)?,
+        })
+    }
+
+    /// Set I²C device address.
+    pub fn set_target_address(&mut self, address: u32) -> Result<()> {
+        // From Linux uapi
+        const I2C_SLAVE: libc::c_ulong = 0x0703;
+
+        // SAFETY: This is the right ioctl number and arguments are suitable.
+        let result = unsafe { ioctl(self.file.as_raw_fd(), I2C_SLAVE, address) };
+        if result < 0 {
+            Err(Error::last_os_error())?
+        }
+        Ok(())
+    }
+}
+
+impl Read for I2CDev {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        self.file.read(buf)
+    }
+}
+
+impl Write for I2CDev {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        self.file.write(buf)
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        self.file.flush()
+    }
+}

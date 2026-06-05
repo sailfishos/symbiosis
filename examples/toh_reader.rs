@@ -1,0 +1,147 @@
+// Copyright (c) 2026 Jolla Mobile Ltd
+
+//! TOH memory chip reader
+
+use libc::{self, ioctl};
+use std::env;
+use std::fs::File;
+use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::os::fd::AsRawFd;
+use std::thread::sleep;
+use std::time::Duration;
+
+// TODO: Get path properly to avoid accidentally writing something unintended
+const I2C_PATH: &str = "/dev/i2c-0";
+const PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
+const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
+const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
+
+/// Wait for INT pin to become 0
+fn wait_for_int() -> Result<(), std::io::Error> {
+    let mut int = File::open(INT_PATH)?;
+    let mut lock = std::io::stdout().lock();
+    write!(lock, "Waiting for INT pin to go low for up to a minute")?;
+    lock.flush()?;
+    for _ in 0..(60_000 / 500) {
+        let value = io::read_to_string(&int)?;
+        if value.trim_end() == "0" {
+            writeln!(lock)?;
+            return Ok(());
+        }
+        int.seek(SeekFrom::Start(0))?;
+        write!(lock, ".")?;
+        lock.flush()?;
+        sleep(Duration::from_millis(500));
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "TOH was not connected",
+    ))
+}
+
+/// Test ADC for the right type of chip
+fn test_adc_pin() -> Result<(), Box<dyn std::error::Error>> {
+    let adc = File::open(ADC_PATH)?;
+    let value = io::read_to_string(&adc)?.trim_end().parse::<u32>()?;
+    match value {
+        // TODO: Change this to use the production values!
+        600..=650 => {
+            println!("TOH with memory chip (8 blocks of 256 bytes) detected");
+            Ok(())
+        }
+        _ => Err(format!("Unexpected value on ADC: {}", value)
+            .to_owned()
+            .into()),
+    }
+}
+
+/// Enable or disable power
+fn set_power_with_silent(enable: bool, silent: bool) -> Result<(), std::io::Error> {
+    let mut pwr = File::create(PWR_PATH)?;
+    pwr.write_all(if enable { b"1" } else { b"0" })?;
+    if !silent {
+        println!("Power {}abled", if enable { "en" } else { "dis" });
+    }
+    sleep(Duration::from_millis(100));
+    Ok(())
+}
+
+/// Enable or disable power
+fn set_power(enable: bool) -> Result<(), std::io::Error> {
+    set_power_with_silent(enable, false)
+}
+
+/// Set I²C device address
+fn set_i2c_target_address(i2c: &mut File, address: u32) -> Result<(), std::io::Error> {
+    // From Linux uapi
+    const I2C_SLAVE: libc::c_ulong = 0x0703;
+
+    let result = unsafe { ioctl(i2c.as_raw_fd(), I2C_SLAVE, address) };
+    if result < 0 {
+        Err(std::io::Error::last_os_error())?
+    }
+    Ok(())
+}
+
+/// Get file size
+/// Use I²C to read the chip into a vector
+fn read_chip(i2c: &mut File) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let mut result = Vec::new();
+    let mut lock = std::io::stdout().lock();
+    write!(lock, "Reading the chip for up to {} bytes", 256 * 8)?;
+    lock.flush()?;
+    let mut buf = [0; 256];
+    let mut read = 0_u64;
+    for address in 0x50..0x58 {
+        set_i2c_target_address(i2c, address)?;
+
+        // Set data address to zero
+        i2c.write_all(&[0])?;
+
+        i2c.read_exact(&mut buf)?;
+        result.extend(buf);
+
+        read += 256;
+        write!(lock, ".")?;
+        lock.flush()?;
+    }
+    writeln!(lock)?;
+    writeln!(lock, "{} bytes read", read)?;
+    Ok(result)
+}
+
+#[cfg(target_os = "linux")]
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut args = env::args_os();
+    args.next().unwrap(); // Skip program name
+    let file = args.next().ok_or("File name required".to_owned())?;
+    if args.count() != 0 {
+        Err("Too many arguments".to_owned())?
+    }
+    // TODO: Add page size argument for writing
+
+    // TODO: Modprobe i2c-dev if it is not there yet
+
+    let mut file = File::create_new(file)?;
+
+    wait_for_int()?;
+
+    test_adc_pin()?;
+
+    set_power(true)?;
+
+    // Open the file for reading and writing
+    let mut i2c = File::options().read(true).write(true).open(I2C_PATH)?;
+
+    let result = read_chip(&mut i2c)?;
+    file.write(result.as_ref())?;
+
+    set_power(false)?;
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    println!("This code works only on Linux!");
+}

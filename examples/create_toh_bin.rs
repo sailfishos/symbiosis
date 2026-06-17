@@ -4,7 +4,7 @@
 
 use ciborium::Value;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::File;
 use std::io::{BufReader, Cursor, Write};
@@ -21,7 +21,6 @@ struct Info {
     product_website: Option<String>,
     power_out: Option<bool>,
     power_in: Option<bool>,
-    ambience: Option<String>,
 }
 
 fn read_yaml(path: &Path) -> Result<Info, Box<dyn std::error::Error>> {
@@ -42,7 +41,6 @@ fn print_info(info: &Info) {
         product_website,
         power_out,
         power_in,
-        ambience,
     } = info;
     if let Some(name) = vendor_name {
         println!("Vendor: {} ({:#06x})", name, vendor_id);
@@ -69,16 +67,13 @@ fn print_info(info: &Info) {
     if let Some(value) = power_in {
         println!("Power input TOH: {} ", value);
     }
-    if let Some(value) = ambience {
-        println!("Ambience: {} ", value);
-    }
 }
 
 fn write_binary(path: &Path, info: Info) -> Result<(), Box<dyn std::error::Error>> {
     let mut file = File::create(path)?;
 
     let mut buff = Cursor::new(Vec::with_capacity(16));
-    let mut payload = HashMap::<String, Value>::new();
+    let mut payload = BTreeMap::<String, Value>::new();
     let Info {
         vendor_id,
         product_id,
@@ -131,14 +126,14 @@ fn write_binary(path: &Path, info: Info) -> Result<(), Box<dyn std::error::Error
 
         // Update size field
         let size = (buff.get_ref().len() - 16) as u16;
-        buff.set_position(14);
+        buff.set_position(0x0e);
         buff.write(&size.to_be_bytes())?;
     }
 
     // Update checksum
     let data = buff.get_ref();
-    let checksum = crc32fast::hash(&data[8..]);
-    buff.set_position(4);
+    let checksum = crc32fast::hash(&data[0x08..]);
+    buff.set_position(0x04);
     buff.write(&checksum.to_be_bytes())?;
 
     // TODO: This could parse the result in buff and check that everything is ok

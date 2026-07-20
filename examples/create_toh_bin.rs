@@ -26,7 +26,7 @@ struct Info {
 fn read_yaml(path: &Path) -> Result<Info, Box<dyn std::error::Error>> {
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
-    let info = serde_saphyr::from_reader(&mut reader)?;
+    let info = yaml_serde::from_reader(&mut reader)?;
     Ok(info)
 }
 
@@ -84,7 +84,6 @@ fn write_binary(path: &Path, info: Info) -> Result<(), Box<dyn std::error::Error
         product_website,
         power_out,
         power_in,
-        ambience,
     } = info;
     if let Some(value) = serial_number {
         payload.insert("SN".to_string(), Value::Text(value));
@@ -106,9 +105,6 @@ fn write_binary(path: &Path, info: Info) -> Result<(), Box<dyn std::error::Error
     }
     if let Some(value) = power_in {
         payload.insert("PI".to_string(), Value::Bool(value));
-    }
-    if let Some(value) = ambience {
-        payload.insert("AM".to_string(), Value::Text(value));
     }
     buff.write(&[0x4A, 0x54, 0x4F, 0x48])?;
     buff.write(&0_u32.to_be_bytes())?; // Placeholder for checksum

@@ -17,6 +17,7 @@ packed_struct = "0.10.1"
 serde = "1.0"
 systemd-journal-logger = "2.2.2"
 tokio = { version = "1.52.3", features = ["full"] }
+yaml_serde = "0.10.2"
 zbus = { version = "4.4.0", default-features = false, features = ["tokio"] }
 zvariant = "4.2.0"
 

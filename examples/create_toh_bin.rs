@@ -141,12 +141,12 @@ fn write_binary(path: &Path, info: Info) -> Result<(), Box<dyn std::error::Error
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args_os();
+    if args.len() != 3 {
+        Err("Usage: create_toh_bin [infile] [outfile]")?
+    };
     args.next().unwrap(); // Skip program name
-    let input = args.next().ok_or("Input file name required".to_owned())?;
-    let output = args.next().ok_or("Output file name required".to_owned())?;
-    if args.count() != 0 {
-        Err("Too many arguments".to_owned())?
-    }
+    let input = args.next().unwrap();
+    let output = args.next().unwrap();
 
     let info = read_yaml(Path::new(&input))?;
     print_info(&info);

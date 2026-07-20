@@ -11,11 +11,8 @@ use std::os::fd::AsRawFd;
 use std::thread::sleep;
 use std::time::Duration;
 
-// TODO: Get path properly to avoid accidentally writing something unintended
-const I2C_PATH: &str = "/dev/i2c-0";
-const PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
-const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
-const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
+use symbiosis::back_cover::paths::{ADC_PATH, I2C_PATH, INT_PATH, PWR_PATH};
+use symbiosis::i2cdev::I2C_SLAVE;
 
 /// Wait for INT pin to become 0
 fn wait_for_int() -> Result<(), std::io::Error> {
@@ -29,7 +26,7 @@ fn wait_for_int() -> Result<(), std::io::Error> {
             writeln!(lock)?;
             return Ok(());
         }
-        int.seek(SeekFrom::Start(0))?;
+        int.rewind()?;
         write!(lock, ".")?;
         lock.flush()?;
         sleep(Duration::from_millis(500));
@@ -74,17 +71,17 @@ fn set_power(enable: bool) -> Result<(), std::io::Error> {
 
 /// Set I²C device address
 fn set_i2c_target_address(i2c: &mut File, address: u32) -> Result<(), std::io::Error> {
-    // From Linux uapi
-    const I2C_SLAVE: libc::c_ulong = 0x0703;
-
-    let result = unsafe { ioctl(i2c.as_raw_fd(), I2C_SLAVE, address) };
+    let raw_fd = i2c.as_raw_fd();
+    let result = unsafe { ioctl(raw_fd, I2C_SLAVE, address) };
     if result < 0 {
         Err(std::io::Error::last_os_error())?
     }
     Ok(())
 }
 
-/// Get file size
+/// Get file size.
+///
+/// Rewinds the offset to beginning of file.
 fn get_file_size(file: &mut File) -> Result<u64, std::io::Error> {
     let size = file.seek(SeekFrom::End(0))?;
     file.rewind()?;
@@ -153,11 +150,15 @@ fn verify_chip(i2c: &mut File, file: &mut File) -> Result<(), Box<dyn std::error
     let mut buf2 = [0; 256];
     let mut verified = 0_u64;
     for address in 0x50.. {
+        assert!(
+            verified <= size,
+            "Verified size {} is larger than size {}!",
+            verified,
+            size
+        );
+
         if verified == size {
             break;
-        } else if verified > size {
-            // This should never happen
-            panic!("Verified size {} is larger than size {}!", verified, size);
         }
 
         set_i2c_target_address(i2c, address)?;

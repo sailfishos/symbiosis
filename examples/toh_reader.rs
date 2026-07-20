@@ -5,16 +5,13 @@
 use libc::{self, ioctl};
 use std::env;
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, Write};
 use std::os::fd::AsRawFd;
 use std::thread::sleep;
 use std::time::Duration;
 
-// TODO: Get path properly to avoid accidentally writing something unintended
-const I2C_PATH: &str = "/dev/i2c-0";
-const PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
-const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
-const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
+use symbiosis::back_cover::paths::{ADC_PATH, I2C_PATH, INT_PATH, PWR_PATH};
+use symbiosis::i2cdev::I2C_SLAVE;
 
 /// Wait for INT pin to become 0
 fn wait_for_int() -> Result<(), std::io::Error> {
@@ -28,7 +25,7 @@ fn wait_for_int() -> Result<(), std::io::Error> {
             writeln!(lock)?;
             return Ok(());
         }
-        int.seek(SeekFrom::Start(0))?;
+        int.rewind()?;
         write!(lock, ".")?;
         lock.flush()?;
         sleep(Duration::from_millis(500));
@@ -73,10 +70,8 @@ fn set_power(enable: bool) -> Result<(), std::io::Error> {
 
 /// Set I²C device address
 fn set_i2c_target_address(i2c: &mut File, address: u32) -> Result<(), std::io::Error> {
-    // From Linux uapi
-    const I2C_SLAVE: libc::c_ulong = 0x0703;
-
-    let result = unsafe { ioctl(i2c.as_raw_fd(), I2C_SLAVE, address) };
+    let raw_fd = i2c.as_raw_fd();
+    let result = unsafe { ioctl(raw_fd, I2C_SLAVE, address) };
     if result < 0 {
         Err(std::io::Error::last_os_error())?
     }
@@ -122,7 +117,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // TODO: Modprobe i2c-dev if it is not there yet
 
-    let mut file = File::create_new(file)?;
+    let mut file = File::options()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(file)?;
 
     wait_for_int()?;
 
@@ -134,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut i2c = File::options().read(true).write(true).open(I2C_PATH)?;
 
     let result = read_chip(&mut i2c)?;
-    file.write(result.as_ref())?;
+    file.write_all(result.as_ref())?;
 
     set_power(false)?;
 

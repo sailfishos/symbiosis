@@ -106,12 +106,12 @@ fn write_binary(path: &Path, info: Info) -> Result<(), Box<dyn std::error::Error
     if let Some(value) = power_in {
         payload.insert("PI".to_string(), Value::Bool(value));
     }
-    buff.write(&[0x4A, 0x54, 0x4F, 0x48])?;
-    buff.write(&0_u32.to_be_bytes())?; // Placeholder for checksum
-    buff.write(&vendor_id.to_be_bytes())?;
-    buff.write(&product_id.to_be_bytes())?;
-    buff.write(&0_u16.to_be_bytes())?; // Padding
-    buff.write(&0_u16.to_be_bytes())?; // Zero for size
+    buff.write_all(&[0x4A, 0x54, 0x4F, 0x48])?;
+    buff.write_all(&0_u32.to_be_bytes())?; // Placeholder for checksum
+    buff.write_all(&vendor_id.to_be_bytes())?;
+    buff.write_all(&product_id.to_be_bytes())?;
+    buff.write_all(&0_u16.to_be_bytes())?; // Padding
+    buff.write_all(&0_u16.to_be_bytes())?; // Zero for size
     assert!(buff.get_ref().len() == 16);
 
     // If we have a payload write that too and update size
@@ -123,19 +123,19 @@ fn write_binary(path: &Path, info: Info) -> Result<(), Box<dyn std::error::Error
         // Update size field
         let size = (buff.get_ref().len() - 16) as u16;
         buff.set_position(0x0e);
-        buff.write(&size.to_be_bytes())?;
+        buff.write_all(&size.to_be_bytes())?;
     }
 
     // Update checksum
     let data = buff.get_ref();
     let checksum = crc32fast::hash(&data[0x08..]);
     buff.set_position(0x04);
-    buff.write(&checksum.to_be_bytes())?;
+    buff.write_all(&checksum.to_be_bytes())?;
 
     // TODO: This could parse the result in buff and check that everything is ok
 
     // Write to file
-    file.write(buff.get_ref().as_slice())?;
+    file.write_all(buff.get_ref().as_slice())?;
     Ok(())
 }
 

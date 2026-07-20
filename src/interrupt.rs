@@ -1,12 +1,12 @@
 // Copyright (c) 2026 Jolla Mobile Ltd
 
 //! Interrupt pin handling.
+use crate::back_cover::paths::INT_PATH;
 use std::fs::File;
-use std::io::{self, ErrorKind, Seek, SeekFrom};
+use std::io::{self, ErrorKind, Seek};
 use std::time::Duration;
 use tokio::time::sleep;
 
-const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
 const SLEEPING_DURATION: Duration = Duration::from_millis(100);
 
 /// Interrupt pin state.
@@ -44,7 +44,7 @@ impl Interrupt {
 
     /// Returns the current int pin state.
     pub fn state(&mut self) -> std::io::Result<IntState> {
-        self.file.seek(SeekFrom::Start(0))?;
+        self.file.rewind()?;
         use IntState::*;
         match io::read_to_string(&self.file)?
             .trim_end()

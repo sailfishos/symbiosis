@@ -2,15 +2,15 @@
 
 //! ID pin handling, ADC and all that stuff.
 
+use crate::back_cover::paths::ADC_PATH;
 use std::fs::File;
-use std::io::{self, ErrorKind, Seek, SeekFrom};
-const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
+use std::io::{self, ErrorKind, Seek};
 
 /// Identified TOH types according to read ADC value.
 pub enum TohId {
-    /// Nominally 10k ohm resistor.
+    /// Nominally 10kΩ resistor.
     R10k,
-    /// Nominally 15k ohm resistor.
+    /// Nominally 15kΩ resistor.
     R15k,
     /// Unknown value resistor.
     Unknown,
@@ -67,7 +67,7 @@ impl Id {
 
     /// Read the current ID pin state with ADC.
     pub fn read(&mut self) -> std::io::Result<AdcValue> {
-        self.file.seek(SeekFrom::Start(0))?;
+        self.file.rewind()?;
         Ok(AdcValue(
             io::read_to_string(&self.file)?
                 .trim_end()

@@ -9,6 +9,9 @@ use std::path::Path;
 
 use libc::{self, ioctl};
 
+// From Linux uapi
+pub const I2C_SLAVE: libc::c_ulong = 0x0703;
+
 /// Use i2c-dev driver to talk with I²C bus.
 pub struct I2CDev {
     file: File,
@@ -27,11 +30,10 @@ impl I2CDev {
 
     /// Set I²C device address.
     pub fn set_target_address(&mut self, address: u32) -> Result<()> {
-        // From Linux uapi
-        const I2C_SLAVE: libc::c_ulong = 0x0703;
+        let raw_fd = self.file.as_raw_fd();
 
         // SAFETY: This is the right ioctl number and arguments are suitable.
-        let result = unsafe { ioctl(self.file.as_raw_fd(), I2C_SLAVE, address) };
+        let result = unsafe { ioctl(raw_fd, I2C_SLAVE, address) };
         if result < 0 {
             Err(Error::last_os_error())?
         }

@@ -1,11 +1,9 @@
 // Copyright (c) 2026 Jolla Mobile Ltd
 
 //! Power output pin handling.
+use crate::back_cover::paths::PWR_PATH;
 use std::fs::File;
-use std::io::{self, ErrorKind, Seek, SeekFrom, Write};
-
-// TODO: Could we lock the file so that other processes cannot change it?
-const PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
+use std::io::{self, ErrorKind, Seek, Write};
 
 /// Power output pin state handling.
 pub struct Power {
@@ -17,6 +15,7 @@ impl Power {
     ///
     /// This uses the device file directly.
     pub fn new() -> std::io::Result<Self> {
+        // TODO: Could we lock the file so that other processes cannot change it?
         Ok(Self {
             file: File::create(PWR_PATH)?,
         })
@@ -24,7 +23,7 @@ impl Power {
 
     /// Set power output.
     pub fn set_power(&mut self, enabled: bool) -> std::io::Result<()> {
-        self.file.seek(SeekFrom::Start(0))?;
+        self.file.rewind()?;
         self.file.write_all(if enabled { b"1" } else { b"0" })?;
         self.file.flush()?;
         Ok(())
@@ -32,7 +31,7 @@ impl Power {
 
     /// Check if power output is enabled.
     pub fn is_powered(&mut self) -> std::io::Result<bool> {
-        self.file.seek(SeekFrom::Start(0))?;
+        self.file.rewind()?;
         match io::read_to_string(&self.file)?
             .trim_end()
             .parse::<u8>()

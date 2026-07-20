@@ -13,8 +13,13 @@ use async_trait::async_trait;
 use std::io::{self, ErrorKind, Read, Write};
 use std::marker::PhantomData;
 
-// TODO: Get path properly to avoid accidentally writing something unintended
-const I2C_PATH: &str = "/dev/i2c-0";
+pub mod paths {
+    // TODO: Get path properly to avoid accidentally writing something unintended
+    pub const I2C_PATH: &str = "/dev/i2c-0";
+    pub const PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
+    pub const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
+    pub const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
+}
 
 mod state {
     pub trait State {}
@@ -69,7 +74,7 @@ impl BackCover<state::Detached> {
         Ok(Self {
             id: Id::new()?,
             int: Interrupt::new()?,
-            i2c: I2CDev::new(I2C_PATH)?,
+            i2c: I2CDev::new(paths::I2C_PATH)?,
             pwr: Power::new()?,
             _state: PhantomData,
         })

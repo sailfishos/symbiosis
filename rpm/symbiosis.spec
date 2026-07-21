@@ -88,9 +88,9 @@ cargo build -j1 $CARGO_OFFLINE --locked --release
 %endif
 
 install -D -m0755 %{rustbuilddir}/%{name} %{buildroot}%{_bindir}/%{name}
-install -D -m0755 %{rustbuilddir}/%{name} %{buildroot}%{_bindir}/create_toh_bin
-install -D -m0755 %{rustbuilddir}/%{name} %{buildroot}%{_sbindir}/toh_reader
-install -D -m0755 %{rustbuilddir}/%{name} %{buildroot}%{_sbindir}/toh_writer
+install -D -m0755 %{rustbuilddir}/create_toh_bin %{buildroot}%{_bindir}/create_toh_bin
+install -D -m0755 %{rustbuilddir}/toh_reader %{buildroot}%{_sbindir}/toh_reader
+install -D -m0755 %{rustbuilddir}/toh_writer %{buildroot}%{_sbindir}/toh_writer
 
 # Systemd unit files and D-Bus configuration
 install -D -m0644 %{SOURCE101} %{buildroot}%{systemunitdir}/%{name}.service

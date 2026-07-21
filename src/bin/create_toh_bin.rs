@@ -2,26 +2,11 @@
 
 //! Create binary for TOH from input
 
-use ciborium::Value;
-use serde::Deserialize;
-use std::collections::BTreeMap;
 use std::env;
 use std::fs::File;
-use std::io::{BufReader, Cursor, Write};
+use std::io::{BufReader, Write};
 use std::path::Path;
-
-#[derive(Deserialize)]
-struct Info {
-    vendor_id: u16,
-    product_id: u16,
-    serial_number: Option<String>,
-    vendor_name: Option<String>,
-    product_name: Option<String>,
-    vendor_website: Option<String>,
-    product_website: Option<String>,
-    power_out: Option<bool>,
-    power_in: Option<bool>,
-}
+use symbiosis::toh::Info;
 
 fn read_yaml(path: &Path) -> Result<Info, Box<dyn std::error::Error>> {
     let file = File::open(path)?;
@@ -39,8 +24,9 @@ fn print_info(info: &Info) {
         product_name,
         vendor_website,
         product_website,
-        power_out,
-        power_in,
+        leave_power_on,
+        power_input_toh,
+        ..
     } = info;
     if let Some(name) = vendor_name {
         println!("Vendor: {} ({:#06x})", name, vendor_id);
@@ -61,81 +47,19 @@ fn print_info(info: &Info) {
     if let Some(value) = product_website {
         println!("Product website: {} ", value);
     }
-    if let Some(value) = power_out {
+    if let Some(value) = leave_power_on {
         println!("Power out enable: {} ", value);
     }
-    if let Some(value) = power_in {
+    if let Some(value) = power_input_toh {
         println!("Power input TOH: {} ", value);
     }
 }
 
 fn write_binary(path: &Path, info: Info) -> Result<(), Box<dyn std::error::Error>> {
     let mut file = File::create(path)?;
-
-    let mut buff = Cursor::new(Vec::with_capacity(16));
-    let mut payload = BTreeMap::<String, Value>::new();
-    let Info {
-        vendor_id,
-        product_id,
-        serial_number,
-        vendor_name,
-        product_name,
-        vendor_website,
-        product_website,
-        power_out,
-        power_in,
-    } = info;
-    if let Some(value) = serial_number {
-        payload.insert("SN".to_string(), Value::Text(value));
-    }
-    if let Some(value) = vendor_name {
-        payload.insert("VN".to_string(), Value::Text(value));
-    }
-    if let Some(value) = product_name {
-        payload.insert("PN".to_string(), Value::Text(value));
-    }
-    if let Some(value) = vendor_website {
-        payload.insert("VS".to_string(), Value::Text(value));
-    }
-    if let Some(value) = product_website {
-        payload.insert("PS".to_string(), Value::Text(value));
-    }
-    if let Some(value) = power_out {
-        payload.insert("PO".to_string(), Value::Bool(value));
-    }
-    if let Some(value) = power_in {
-        payload.insert("PI".to_string(), Value::Bool(value));
-    }
-    buff.write_all(&[0x4A, 0x54, 0x4F, 0x48])?;
-    buff.write_all(&0_u32.to_be_bytes())?; // Placeholder for checksum
-    buff.write_all(&vendor_id.to_be_bytes())?;
-    buff.write_all(&product_id.to_be_bytes())?;
-    buff.write_all(&0_u16.to_be_bytes())?; // Padding
-    buff.write_all(&0_u16.to_be_bytes())?; // Zero for size
-    assert!(buff.get_ref().len() == 16);
-
-    // If we have a payload write that too and update size
-    if !payload.is_empty() {
-        payload.insert("SC".to_string(), Value::Integer(0.into()));
-
-        ciborium::into_writer(&payload, &mut buff)?;
-
-        // Update size field
-        let size = (buff.get_ref().len() - 16) as u16;
-        buff.set_position(0x0e);
-        buff.write_all(&size.to_be_bytes())?;
-    }
-
-    // Update checksum
-    let data = buff.get_ref();
-    let checksum = crc32fast::hash(&data[0x08..]);
-    buff.set_position(0x04);
-    buff.write_all(&checksum.to_be_bytes())?;
-
+    let content = info.into_bytes()?;
     // TODO: This could parse the result in buff and check that everything is ok
-
-    // Write to file
-    file.write_all(buff.get_ref().as_slice())?;
+    file.write_all(content.as_slice())?;
     Ok(())
 }
 

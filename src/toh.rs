@@ -2,12 +2,12 @@
 
 //! TOH interface.
 
-// Currently only used internally by the daemon but would be useful for other things as well.
-
 use crate::errors::*;
 use log::warn;
 use packed_struct::{PackedStruct, PackingError};
+use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::io::{Cursor, Write};
 use std::num::TryFromIntError;
 
 /// Parsing of memory chip content failed.
@@ -81,7 +81,7 @@ impl From<ExtraValueConversionError> for ParseError {
 
 /// Values in CBOR data.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub enum ExtraValue {
     // TODO: Fill in the rest of the data types in CBOR
     Boolean(bool),
@@ -177,6 +177,31 @@ impl ExtraValue {
             )),
         }
     }
+
+    pub fn into_cbor(self) -> ciborium::Value {
+        use ciborium::Value;
+        use ExtraValue::*;
+        match self {
+            Boolean(value) => value.into(),
+            I64(value) => value.into(),
+            U64(value) => value.into(),
+            F64(value) => value.into(),
+            Bytes(array) => array.as_slice().into(),
+            Text(string) => string.as_str().into(),
+            Null => Value::Null,
+            Tag(tag, value) => Value::Tag(tag, Box::new(value.into_cbor())),
+            Array(array) => array
+                .into_iter()
+                .map(|value| value.into_cbor())
+                .collect::<Vec<_>>()
+                .into(),
+            Map(map) => map
+                .into_iter()
+                .map(|(key, value)| (key.into(), value.into_cbor()))
+                .collect::<Vec<(_, _)>>()
+                .into(),
+        }
+    }
 }
 
 impl<'v> From<NonConvertableValue<'v>> for &'v ExtraValue {
@@ -187,7 +212,7 @@ impl<'v> From<NonConvertableValue<'v>> for &'v ExtraValue {
 
 // TODO: How about chipless TOHs? Perhaps we need an enum
 /// TOH memory chip content.
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, Deserialize, PartialEq)]
 pub struct Info {
     // TODO: Non-exhaustive?
     pub vendor_id: u16,
@@ -313,6 +338,96 @@ impl Info {
                 .map(|(key, value)| Ok((key, ExtraValue::try_from(value)?)))
                 .collect::<Result<BTreeMap<_, _>, ExtraValueConversionError>>()?,
         })
+    }
+
+    /// Returns payload content.
+    ///
+    /// Set include_extra to false to skip all extra keys.
+    fn get_payload(&self, include_extra: bool) -> BTreeMap<String, ciborium::Value> {
+        use ciborium::Value;
+        let mut payload = BTreeMap::<String, Value>::new();
+        let Info {
+            serial_number,
+            vendor_name,
+            product_name,
+            vendor_website,
+            product_website,
+            leave_power_on,
+            power_input_toh,
+            extra,
+            ..
+        } = self;
+        if let Some(value) = serial_number {
+            payload.insert("SN".to_owned(), value.as_str().into());
+        }
+        if let Some(value) = vendor_name {
+            payload.insert("VN".to_owned(), value.as_str().into());
+        }
+        if let Some(value) = product_name {
+            payload.insert("PN".to_owned(), value.as_str().into());
+        }
+        if let Some(value) = vendor_website {
+            payload.insert("VS".to_owned(), value.as_str().into());
+        }
+        if let Some(value) = product_website {
+            payload.insert("PS".to_owned(), value.as_str().into());
+        }
+        if let Some(value) = leave_power_on {
+            payload.insert("PO".to_owned(), (*value).into());
+        }
+        if let Some(value) = power_input_toh {
+            payload.insert("PI".to_owned(), (*value).into());
+        }
+        if !payload.is_empty() {
+            // Zero is the only existing version payload schema.
+            payload.insert("SC".to_owned(), 0.into());
+        }
+
+        if include_extra {
+            for (key, value) in extra.iter() {
+                payload.insert(key.to_owned(), value.clone().into_cbor());
+            }
+        }
+
+        payload
+    }
+
+    /// Turn TOH info into bytes that can be written onto a memory chip.
+    pub fn into_bytes(&self) -> std::io::Result<Vec<u8>> {
+        let mut buff = Cursor::new(Vec::with_capacity(16));
+
+        // Write the header
+        buff.write_all(&[0x4A, 0x54, 0x4F, 0x48])?;
+        buff.write_all(&0_u32.to_be_bytes())?; // Placeholder for checksum
+        buff.write_all(&self.vendor_id.to_be_bytes())?;
+        buff.write_all(&self.product_id.to_be_bytes())?;
+        buff.write_all(&0_u16.to_be_bytes())?; // Padding
+        buff.write_all(&0_u16.to_be_bytes())?; // Zero for size
+        assert!(buff.get_ref().len() == 16);
+
+        // If we have a payload write that too and update size
+        let payload = self.get_payload(true);
+        if !payload.is_empty() {
+            ciborium::into_writer(&payload, &mut buff).map_err(|error| {
+                use ciborium::ser::Error;
+                match error {
+                    Error::Io(error) => error,
+                    Error::Value(error) => std::io::Error::other(error),
+                }
+            })?;
+
+            // Update size field
+            let size = (buff.get_ref().len() - 16) as u16;
+            buff.set_position(0x0e);
+            buff.write_all(&size.to_be_bytes())?;
+        }
+
+        // Update checksum
+        let data = buff.get_ref();
+        let checksum = crc32fast::hash(&data[0x08..]);
+        buff.set_position(0x04);
+        buff.write_all(&checksum.to_be_bytes())?;
+        Ok(buff.into_inner())
     }
 }
 

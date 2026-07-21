@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Jolla Mobile Ltd
 
-//! TOH memory chip reader
+//! TOH memory chip reader.
 
+use argh::FromArgs;
 use libc::{self, ioctl};
-use std::env;
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
 use std::os::fd::AsRawFd;
@@ -12,6 +12,14 @@ use std::time::Duration;
 
 use symbiosis::back_cover::paths::{ADC_PATH, I2C_PATH, INT_PATH, PWR_PATH};
 use symbiosis::i2cdev::I2C_SLAVE;
+
+/// TOH memory chip reader.
+#[derive(FromArgs)]
+struct Arguments {
+    /// output file.
+    #[argh(positional)]
+    output_file: String,
+}
 
 /// Wait for INT pin to become 0
 fn wait_for_int() -> Result<(), std::io::Error> {
@@ -107,12 +115,7 @@ fn read_chip(i2c: &mut File) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
 
 #[cfg(target_os = "linux")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut args = env::args_os();
-    args.next().unwrap(); // Skip program name
-    let file = args.next().ok_or("File name required".to_owned())?;
-    if args.count() != 0 {
-        Err("Too many arguments".to_owned())?
-    }
+    let args: Arguments = argh::from_env();
     // TODO: Add page size argument for writing
 
     // TODO: Modprobe i2c-dev if it is not there yet
@@ -121,7 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .create(true)
         .write(true)
         .truncate(true)
-        .open(file)?;
+        .open(args.output_file)?;
 
     wait_for_int()?;
 

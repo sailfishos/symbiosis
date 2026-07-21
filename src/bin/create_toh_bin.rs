@@ -1,12 +1,23 @@
 // Copyright (c) 2026 Jolla Mobile Ltd
 
-//! Create binary for TOH from input
+//! Create binary for TOH from input.
 
-use std::env;
+use argh::FromArgs;
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::Path;
 use symbiosis::toh::Info;
+
+/// Create binary for TOH from input.
+#[derive(FromArgs)]
+struct Arguments {
+    /// input file.
+    #[argh(positional)]
+    input_file: String,
+    /// output file.
+    #[argh(positional)]
+    output_file: String,
+}
 
 fn read_yaml(path: &Path) -> Result<Info, Box<dyn std::error::Error>> {
     let file = File::open(path)?;
@@ -64,16 +75,9 @@ fn write_binary(path: &Path, info: Info) -> Result<(), Box<dyn std::error::Error
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut args = env::args_os();
-    if args.len() != 3 {
-        Err("Usage: create_toh_bin [infile] [outfile]")?
-    };
-    args.next().unwrap(); // Skip program name
-    let input = args.next().unwrap();
-    let output = args.next().unwrap();
-
-    let info = read_yaml(Path::new(&input))?;
+    let args: Arguments = argh::from_env();
+    let info = read_yaml(Path::new(&args.input_file))?;
     print_info(&info);
-    write_binary(Path::new(&output), info)?;
+    write_binary(Path::new(&args.output_file), info)?;
     Ok(())
 }

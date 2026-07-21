@@ -29,6 +29,13 @@ BuildRequires:  rust-std-static >= 1.75.0
 %description
 %{summary}.
 
+%package tools
+Summary:  Tools for developing TOHs
+Provides: toh-tools = %{version}-%{release}
+
+%description tools
+%{summary}.
+
 %prep
 %autosetup -a1 -n %{name}-%{version}
 
@@ -81,6 +88,9 @@ cargo build -j1 $CARGO_OFFLINE --locked --release
 %endif
 
 install -D -m0755 %{rustbuilddir}/%{name} %{buildroot}%{_bindir}/%{name}
+install -D -m0755 %{rustbuilddir}/%{name} %{buildroot}%{_bindir}/create_toh_bin
+install -D -m0755 %{rustbuilddir}/%{name} %{buildroot}%{_sbindir}/toh_reader
+install -D -m0755 %{rustbuilddir}/%{name} %{buildroot}%{_sbindir}/toh_writer
 
 # Systemd unit files and D-Bus configuration
 install -D -m0644 %{SOURCE101} %{buildroot}%{systemunitdir}/%{name}.service
@@ -107,3 +117,8 @@ systemctl daemon-reload || :
 %{systemunitdir}/%{name}.service
 %{dbussystemservicedir}/org.sailfishos.tohd1.service
 %{dbussystempolicydir}/%{name}.conf
+
+%files tools
+%{_bindir}/create_toh_bin
+%{_sbindir}/toh_reader
+%{_sbindir}/toh_writer

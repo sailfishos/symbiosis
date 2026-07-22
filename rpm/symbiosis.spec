@@ -23,8 +23,8 @@ BuildRequires:  rust >= 1.75.0
 BuildRequires:  rust-std-static >= 1.75.0
 
 %define systemunitdir %{_prefix}/lib/systemd/system
-%define dbussystemservicedir %{_datadir}/dbus/system-services
-%define dbussystempolicydir %{_datadir}/dbus/system.d
+%define dbussystemservicedir %{_datadir}/dbus-1/system-services
+%define dbussystempolicydir %{_datadir}/dbus-1/system.d
 
 %description
 %{summary}.

@@ -70,12 +70,13 @@ impl BackCover<state::Detached> {
     ///
     /// Requires root access and thus is mainly only good for the daemon.
     pub fn new() -> io::Result<Self> {
-        // TODO: This should turn off the power here so we always start at that state.
+        let mut pwr = Power::new()?;
+        pwr.set_power(false)?;
         Ok(Self {
             id: Id::new()?,
             int: Interrupt::new()?,
             i2c: I2CDev::new(paths::I2C_PATH)?,
-            pwr: Power::new()?,
+            pwr,
             _state: PhantomData,
         })
     }
@@ -162,6 +163,10 @@ impl<P: state::State + std::marker::Send> BackCover<P> {
         }
         values.sort();
         Ok(values[2])
+    }
+
+    pub fn power_down(self) -> io::Result<BackCover<state::Detached>> {
+        BackCover::new()
     }
 }
 

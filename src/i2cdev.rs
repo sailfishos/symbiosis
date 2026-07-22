@@ -6,7 +6,7 @@ use crate::back_cover::paths::I2C_PATH;
 use libc::{self, ioctl};
 use std::fs::File;
 use std::io::{Error, Read, Result, Write};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::path::Path;
 
 // From Linux uapi
@@ -61,5 +61,11 @@ impl Write for I2cDev {
 
     fn flush(&mut self) -> Result<()> {
         self.file.flush()
+    }
+}
+
+impl AsFd for I2cDev {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }

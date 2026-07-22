@@ -3,38 +3,43 @@
 //! TOH memory chip writer.
 
 use argh::FromArgs;
-use libc::{self, ioctl};
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::Rem;
-use std::os::fd::AsRawFd;
 use std::thread::sleep;
 use std::time::Duration;
 
-use symbiosis::back_cover::paths::{ADC_PATH, I2C_PATH, INT_PATH, PWR_PATH};
-use symbiosis::i2cdev::I2C_SLAVE;
+use symbiosis::back_cover::paths::I2C_PATH;
+use symbiosis::i2cdev::I2CDev;
+use symbiosis::id::{Id, TohId};
+use symbiosis::interrupt::{IntState, Interrupt};
+use symbiosis::power::Power;
 
 /// TOH memory chip writer.
+///
+/// Uses i2c-dev to write chips. Only supports chips with 256 bytes * 8 blocks.
 #[derive(FromArgs)]
+#[argh(help_triggers("-h", "--help"))]
 struct Arguments {
     /// input file.
     #[argh(positional)]
     input_file: String,
+    /// page size.
+    #[argh(option, short = 'p', default = "16")]
+    page_size: u8,
 }
 
 /// Wait for INT pin to become 0
 fn wait_for_int() -> Result<(), std::io::Error> {
-    let mut int = File::open(INT_PATH)?;
+    let mut int = Interrupt::new()?;
     let mut lock = std::io::stdout().lock();
     write!(lock, "Waiting for INT pin to go low for up to a minute")?;
     lock.flush()?;
     for _ in 0..(60_000 / 500) {
-        let value = io::read_to_string(&int)?;
-        if value.trim_end() == "0" {
+        if int.state()? == IntState::Low {
             writeln!(lock)?;
             return Ok(());
         }
-        int.rewind()?;
         write!(lock, ".")?;
         lock.flush()?;
         sleep(Duration::from_millis(500));
@@ -47,44 +52,37 @@ fn wait_for_int() -> Result<(), std::io::Error> {
 
 /// Test ADC for the right type of chip
 fn test_adc_pin() -> Result<(), Box<dyn std::error::Error>> {
-    let adc = File::open(ADC_PATH)?;
-    let value = io::read_to_string(&adc)?.trim_end().parse::<u32>()?;
-    match value {
-        // TODO: Change this to use the production values!
-        600..=650 => {
+    let mut id = Id::new()?;
+    let value = id.read()?;
+    match value.identify() {
+        TohId::R10k => {
             println!("TOH with memory chip (8 blocks of 256 bytes) detected");
             Ok(())
         }
-        _ => Err(format!("Unexpected value on ADC: {}", value)
-            .to_owned()
-            .into()),
+        TohId::R15k | TohId::Unknown => Err("Unsupported TOH".into()),
+        TohId::NotPresent => Err("Missing TOH".into()),
     }
 }
 
-/// Enable or disable power
-fn set_power_with_silent(enable: bool, silent: bool) -> Result<(), std::io::Error> {
-    let mut pwr = File::create(PWR_PATH)?;
-    pwr.write_all(if enable { b"1" } else { b"0" })?;
-    if !silent {
-        println!("Power {}abled", if enable { "en" } else { "dis" });
-    }
+/// Runs the function with power on.
+fn with_power<F: FnOnce() -> Result<(), Box<dyn std::error::Error>>>(
+    f: F,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut power = Power::new()?;
+    power.set_power(true)?;
+    println!("Power enabled");
     sleep(Duration::from_millis(100));
-    Ok(())
-}
 
-/// Enable or disable power
-fn set_power(enable: bool) -> Result<(), std::io::Error> {
-    set_power_with_silent(enable, false)
-}
+    let result = f();
 
-/// Set I²C device address
-fn set_i2c_target_address(i2c: &mut File, address: u32) -> Result<(), std::io::Error> {
-    let raw_fd = i2c.as_raw_fd();
-    let result = unsafe { ioctl(raw_fd, I2C_SLAVE, address) };
-    if result < 0 {
-        Err(std::io::Error::last_os_error())?
+    if result.is_ok() {
+        power.set_power(false)?;
+        println!("Power disabled");
+    } else {
+        let _ = power.set_power(false);
     }
-    Ok(())
+
+    result
 }
 
 /// Get file size.
@@ -97,7 +95,11 @@ fn get_file_size(file: &mut File) -> Result<u64, std::io::Error> {
 }
 
 /// Use I²C to write the chip
-fn write_chip(i2c: &mut File, file: &mut File) -> Result<(), Box<dyn std::error::Error>> {
+fn write_chip(
+    i2c: &mut I2CDev,
+    file: &mut File,
+    page_size: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Let's check how many bytes we have to read
     let size = get_file_size(file)?;
     // TODO: Support other types of memory chips
@@ -107,8 +109,7 @@ fn write_chip(i2c: &mut File, file: &mut File) -> Result<(), Box<dyn std::error:
             "Too big input file: {} bytes (must be < {} bytes)",
             size,
             256 * 8
-        )
-        .to_owned())?
+        ))?
     }
     let size = size as u32;
 
@@ -117,23 +118,24 @@ fn write_chip(i2c: &mut File, file: &mut File) -> Result<(), Box<dyn std::error:
     write!(lock, "Writing {} bytes", size)?;
     lock.flush()?;
 
-    // TODO: Support other page sizes
-    let mut buf = [0; 17]; // 1 byte for address and 16 byte pages
+    // Buffer to contain page and 1 byte for address
+    let mut buf = vec![0u8; page_size + 1];
     let mut written: usize = 0;
 
     for address in 0x50..0x50 + size.div_ceil(256) {
-        set_i2c_target_address(i2c, address)?;
+        i2c.set_target_address(address)?;
 
         let start = written - written.rem(256);
         while written < start + 256 {
             let data_address = written - start;
-            let length = (256 - data_address).min(16);
+            let length = (256 - data_address).min(page_size);
             let length = file.read(&mut buf[1..length + 1])?;
             if length == 0 {
                 break;
             }
             buf[0] = data_address as u8;
             i2c.write_all(&buf[..length + 1])?;
+            // TODO: This should wait for ack instead
             sleep(Duration::from_millis(length as u64 * 7)); // Typically one byte takes 7 ms
             written += length;
             write!(lock, ".")?;
@@ -146,7 +148,7 @@ fn write_chip(i2c: &mut File, file: &mut File) -> Result<(), Box<dyn std::error:
 }
 
 /// Use I²C to verify the chip
-fn verify_chip(i2c: &mut File, file: &mut File) -> Result<(), Box<dyn std::error::Error>> {
+fn verify_chip(i2c: &mut I2CDev, file: &mut File) -> Result<(), Box<dyn std::error::Error>> {
     // Let's check how many bytes we have to verify
     let size = get_file_size(file)?;
 
@@ -169,7 +171,7 @@ fn verify_chip(i2c: &mut File, file: &mut File) -> Result<(), Box<dyn std::error
             break;
         }
 
-        set_i2c_target_address(i2c, address)?;
+        i2c.set_target_address(address)?;
 
         // Set data address to zero
         i2c.write_all(&[0])?;
@@ -203,7 +205,7 @@ fn verify_chip(i2c: &mut File, file: &mut File) -> Result<(), Box<dyn std::error
             )?;
             writeln!(lock, "Expected ({} bytes): {:?}", length, buf1)?;
             writeln!(lock, "Got ({} bytes): {:?}", length, buf2)?;
-            Err("Verification failed".to_owned())?
+            Err("Verification failed")?
         }
 
         verified += length as u64;
@@ -216,40 +218,23 @@ fn verify_chip(i2c: &mut File, file: &mut File) -> Result<(), Box<dyn std::error
         Ok(())
     } else {
         writeln!(lock, "Only {} bytes verified from memory chip", verified)?;
-        Err("Not enough bytes read from memory chip".to_owned().into())
+        Err("Not enough bytes read from memory chip".into())
     }
 }
 
 #[cfg(target_os = "linux")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Arguments = argh::from_env();
-    // TODO: Add page size argument for writing
-
     // TODO: Modprobe i2c-dev if it is not there yet
-
+    // TODO: Or use i2c-dev handed over by tohd interface if there is one
     let mut file = File::open(args.input_file)?;
-
     wait_for_int()?;
-
     test_adc_pin()?;
-
-    set_power(true)?;
-
-    // Open the file for reading and writing
-    let mut i2c = File::options().read(true).write(true).open(I2C_PATH)?;
-
-    write_chip(&mut i2c, &mut file)
-        .and_then(|()| verify_chip(&mut i2c, &mut file))
-        // TODO: Rust 1.76.0 would let us use Result::inspect_err() here
-        .map_err(|err| {
-            // If writing or verifying failed, try to turn off power
-            let _ = set_power_with_silent(false, true);
-            err
-        })?;
-
-    set_power(false)?;
-
-    Ok(())
+    with_power(|| {
+        let mut i2c = I2CDev::new(I2C_PATH)?;
+        write_chip(&mut i2c, &mut file, args.page_size.into())
+            .and_then(|()| verify_chip(&mut i2c, &mut file))
+    })
 }
 
 #[cfg(not(target_os = "linux"))]

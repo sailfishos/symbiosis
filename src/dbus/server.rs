@@ -1,55 +1,17 @@
 // Copyright (c) 2026 Jolla Mobile Ltd
 
-//! D-Bus specific stuff.
+//! D-Bus server side stuff.
 
+use super::error::*;
 use crate::{i2cdev::I2cDev, toh::Info};
 use std::collections::HashMap;
 use std::os::fd::AsFd;
-use zbus::{fdo::DBusProxy, interface, message::Header, names::UniqueName, Connection, DBusError};
+use zbus::{fdo::DBusProxy, interface, message::Header, names::UniqueName, Connection};
 use zvariant::{Fd, Optional, OwnedValue};
 
 // TODO: Similar borrowing interface for interrupts from TOH:
 // I.e. the service should monitor interrupt pin and react differently to disconnects and TOH
 // mcu initiated interrupts.
-
-#[derive(DBusError, Debug)]
-#[zbus(prefix = "org.sailfishos.tohd1")]
-enum BorrowError {
-    /// The process trying to borrow is not run as root.
-    ///
-    /// This restriction may get lifted in the future if suitable access control mechanism is found.
-    AccessDenied,
-    /// The device was already borrowed.
-    AlreadyBorrowed,
-    /// No sender in message header.
-    NoSender,
-    /// IO error.
-    IOError,
-    /// Internal errors or anything else.
-    #[zbus(error)]
-    ZBus(zbus::Error),
-}
-
-impl From<zbus::fdo::Error> for BorrowError {
-    fn from(error: zbus::fdo::Error) -> Self {
-        BorrowError::ZBus(error.into())
-    }
-}
-
-impl From<std::io::Error> for BorrowError {
-    fn from(_error: std::io::Error) -> Self {
-        BorrowError::IOError
-    }
-}
-
-#[derive(DBusError, Debug)]
-#[zbus(prefix = "org.sailfishos.tohd1")]
-enum ReturnError {
-    /// There was no active loan for the caller.
-    NoLoan,
-    /// No sender in message header.
-    NoSender,
-}
 
 /// Representation of lent out i2c-dev access.
 ///

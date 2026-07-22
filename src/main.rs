@@ -13,7 +13,7 @@ use std::error::Error;
 use std::time::Duration;
 use symbiosis::{
     back_cover::{BackCover, Variant, WaitDisconnect},
-    dbus::Toh,
+    dbus::server::Toh,
     toh::Detect,
 };
 use systemd_journal_logger::JournalLog;

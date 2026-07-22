@@ -11,7 +11,6 @@ publish = false
 argh = "0.1.13"
 async-trait = "0.1.89"
 ciborium = "0.2.2"
-clap = { version = "4.5.61", features = ["derive"] }
 crc32fast = "1.5.0"
 libc = "0.2.186"
 log = "0.4.33"

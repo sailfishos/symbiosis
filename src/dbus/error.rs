@@ -41,4 +41,7 @@ pub enum ReturnError {
     NoLoan,
     /// No sender in message header.
     NoSender,
+    /// Internal errors or anything else.
+    #[zbus(error)]
+    ZBus(zbus::Error),
 }

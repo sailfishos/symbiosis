@@ -3,4 +3,8 @@
 //! D-Bus specific stuff.
 
 pub mod error;
+mod proxy;
 pub mod server;
+
+pub use proxy::TohProxy;
+pub use proxy::TohProxyBlocking;

@@ -2,15 +2,15 @@
 
 //! I²C device.
 
+use crate::back_cover::paths::I2C_PATH;
+use libc::{self, ioctl};
 use std::fs::File;
 use std::io::{Error, Read, Result, Write};
 use std::os::fd::AsRawFd;
 use std::path::Path;
 
-use libc::{self, ioctl};
-
 // From Linux uapi
-pub const I2C_SLAVE: libc::c_ulong = 0x0703;
+const I2C_SLAVE: libc::c_ulong = 0x0703;
 
 /// Use i2c-dev driver to talk with I²C bus.
 pub struct I2CDev {
@@ -26,6 +26,12 @@ impl I2CDev {
         Ok(Self {
             file: File::options().read(true).write(true).open(path)?,
         })
+    }
+
+    /// Create new instance for TOH I²C bus.
+    pub fn toh_dev() -> Result<Self> {
+        // TODO: Get path properly to avoid accidentally writing something unintended
+        I2CDev::new(I2C_PATH)
     }
 
     /// Set I²C device address.

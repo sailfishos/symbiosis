@@ -13,12 +13,12 @@ use async_trait::async_trait;
 use std::io::{self, ErrorKind, Read, Write};
 use std::marker::PhantomData;
 
+// TODO: Make this private to the crate once there are no external users
 pub mod paths {
-    // TODO: Get path properly to avoid accidentally writing something unintended
     pub const I2C_PATH: &str = "/dev/i2c-0";
-    pub const PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
-    pub const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
-    pub const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
+    pub(crate) const PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
+    pub(crate) const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
+    pub(crate) const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
 }
 
 mod state {
@@ -70,12 +70,13 @@ impl BackCover<state::Detached> {
     ///
     /// Requires root access and thus is mainly only good for the daemon.
     pub fn new() -> io::Result<Self> {
+        // TODO: Handle also the buffer chip power
         let mut pwr = Power::new()?;
         pwr.set_power(false)?;
         Ok(Self {
             id: Id::new()?,
             int: Interrupt::new()?,
-            i2c: I2CDev::new(paths::I2C_PATH)?,
+            i2c: I2CDev::toh_dev()?,
             pwr,
             _state: PhantomData,
         })

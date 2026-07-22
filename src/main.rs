@@ -88,6 +88,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 None
             }
         };
+        // Wait a bit after powering up so the chip has a chance to be ready
+        sleep(Duration::from_millis(100)).await;
         if let Some(mut back_cover) = detect {
             // TODO: Detection might fail because the TOH has not yet properly connected => we
             // should repeat until we get acknowledge or the TOH disconnects.
@@ -95,6 +97,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Ok(Some(info)) => {
                     let toh = Toh::new(info);
                     object_server.at(TOH_PATH, toh).await?;
+                    // TODO: This should power down the TOH here if there is no need to keep it
+                    // powered
                     back_cover.wait_disconnect_boxed().await?;
                     object_server.remove::<Toh, _>(TOH_PATH).await?;
                 }

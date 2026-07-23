@@ -67,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err("No TOH detected")
         }
     }?;
-    match back_cover.power_up() {
+    match back_cover.power_up().await {
         Ok(variant) => {
             if let Some(content) = read_content(variant)? {
                 println!("Read {} bytes from the chip", content.len());

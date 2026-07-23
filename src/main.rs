@@ -66,7 +66,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         debug!("Looking for TOH");
         let back_cover = back_cover.wait_connect().await?;
         debug!("TOH connected");
-        let detect: Option<Box<dyn BackCoverDetect>> = match back_cover.power_up() {
+        let detect: Option<Box<dyn BackCoverDetect>> = match back_cover.power_up().await {
             Ok(Variant::With256BBlocks(back_cover)) => {
                 debug!("Up to 256B block memory chip detected");
                 Some(Box::new(back_cover))
@@ -93,7 +93,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         if let Some(mut back_cover) = detect {
             // TODO: Detection might fail because the TOH has not yet properly connected => we
             // should repeat until we get acknowledge or the TOH disconnects.
-            match back_cover.detect() {
+            match back_cover.detect().await {
                 Ok(Some(info)) => {
                     let toh = Toh::new(info);
                     object_server.at(TOH_PATH, toh).await?;

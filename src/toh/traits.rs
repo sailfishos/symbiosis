@@ -3,17 +3,20 @@
 //! TOH interface.
 
 use super::info::*;
+use async_trait::async_trait;
 
 /// Trait for is_powered method.
+#[async_trait]
 pub trait IsPowered {
     /// Check if TOH connector power out is on.
-    fn is_powered(&mut self) -> std::io::Result<bool>;
+    async fn is_powered(&mut self) -> std::io::Result<bool>;
 }
 
 /// Trait for is_present method.
+#[async_trait]
 pub trait IsPresent {
     /// Check if there is a TOH present.
-    fn is_present(&mut self) -> std::io::Result<bool>;
+    async fn is_present(&mut self) -> std::io::Result<bool>;
 }
 
 /// Error during TOH detection.
@@ -38,10 +41,11 @@ impl From<ParseError> for DetectionError {
 }
 
 /// Trait for detect method.
+#[async_trait]
 pub trait Detect {
     /// Detect presence of TOH and fetch TOH info.
     ///
     /// Returns None if no TOH is present. If TOH is present returns Some with Info that may be
     /// populated from device or cache.
-    fn detect(&mut self) -> Result<Option<Info>, DetectionError>;
+    async fn detect(&mut self) -> Result<Option<Info>, DetectionError>;
 }

@@ -12,6 +12,8 @@ use crate::toh::*;
 use async_trait::async_trait;
 use std::io::{self, ErrorKind, Read, Write};
 use std::marker::PhantomData;
+use std::time::Duration;
+use tokio::time::sleep;
 
 pub(crate) mod paths {
     pub(crate) const I2C_PATH: &str = "/dev/i2c-0";
@@ -104,10 +106,10 @@ impl BackCover<state::Attached> {
     ///
     /// Returns an error if TOH is not present.
     /// Returns Ok(None) if TOH is not of a supported type.
-    pub fn power_up(mut self) -> io::Result<Variant> {
+    pub async fn power_up(mut self) -> io::Result<Variant> {
         self.pwr.set_power(true)?;
         // TODO: We should probably wait a bit here.
-        let adc = self.read_adc()?;
+        let adc = self.read_adc().await?;
         let BackCover {
             id,
             i2c,
@@ -155,11 +157,11 @@ impl<P: state::State + std::marker::Send> BackCover<P> {
     /// Read ADC.
     ///
     /// Reads the Id pin multiple times and returns the median value.
-    pub fn read_adc(&mut self) -> io::Result<AdcValue> {
+    pub async fn read_adc(&mut self) -> io::Result<AdcValue> {
         let mut values = Vec::new();
         for _ in 0..5 {
-            // TODO: This could wait a little between reads but that requires making the method async.
             values.push(self.id.read()?);
+            sleep(Duration::from_millis(10)).await;
         }
         values.sort();
         Ok(values[2])
@@ -206,16 +208,18 @@ impl<P: state::State + std::marker::Send> WaitDisconnect for BackCover<P> {
     }
 }
 
+#[async_trait]
 impl<P: state::State + std::marker::Send> IsPowered for BackCover<P> {
-    fn is_powered(&mut self) -> io::Result<bool> {
+    async fn is_powered(&mut self) -> io::Result<bool> {
         self.pwr.is_powered()
     }
 }
 
+#[async_trait]
 impl<P: state::State + std::marker::Send> IsPresent for BackCover<P> {
-    fn is_present(&mut self) -> io::Result<bool> {
+    async fn is_present(&mut self) -> io::Result<bool> {
         if self.read_int_state()? == IntState::Low {
-            Ok(self.read_adc()?.is_toh_present())
+            Ok(self.read_adc().await?.is_toh_present())
         } else {
             Ok(false)
         }
@@ -251,8 +255,9 @@ impl BackCover<state::Present256BBlocks> {
     }
 }
 
+#[async_trait]
 impl Detect for BackCover<state::Present256BBlocks> {
-    fn detect(&mut self) -> Result<Option<Info>, DetectionError> {
+    async fn detect(&mut self) -> Result<Option<Info>, DetectionError> {
         let content = self.read_chip()?;
         Ok(Some(Info::parse_from_bytes(&content)?))
     }

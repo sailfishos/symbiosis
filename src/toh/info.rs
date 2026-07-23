@@ -9,50 +9,35 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::io::{Cursor, Write};
 use std::num::TryFromIntError;
+use thiserror::Error;
 
 /// Parsing of memory chip content failed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum ParseError {
     /// Header did not unpack.
-    BadHeader(PackingError),
+    #[error("Bad header: {0}")]
+    BadHeader(#[from] PackingError),
     /// Magic was not correct.
-    BadMagic(WrongMagicError),
+    #[error("Bad magic value: {0}")]
+    BadMagic(#[from] WrongMagicError),
     /// Checksum was not correct.
-    BadChecksum(ChecksumError),
+    #[error("Bad magic value: {0}")]
+    BadChecksum(#[from] ChecksumError),
     /// There is not enough data to parse header or payload.
-    NotEnoughData(MissingDataError),
+    #[error("Not enough data to parse: {0}")]
+    NotEnoughData(#[from] MissingDataError),
     /// Payload did not parse correctly.
+    #[error("CBOR parsing failed: {0}")]
     PayloadParsingError(CBORParsingError),
     /// Payload had wrong type for a known key.
+    #[error("Payload had unexpected type for a known key, value: {0:?}")]
     PayloadWrongType(ciborium::Value),
     /// Payload integer value out of bounds for a known key.
-    PayloadOutOfBoundsInteger(TryFromIntError),
+    #[error("Integer in payload is out of bounds for a known key: {0}")]
+    PayloadOutOfBoundsInteger(#[from] TryFromIntError),
     /// Payload unsupported value or type.
-    PayloadUnsupportedValue(ExtraValueConversionError),
-}
-
-impl From<PackingError> for ParseError {
-    fn from(error: PackingError) -> Self {
-        ParseError::BadHeader(error)
-    }
-}
-
-impl From<WrongMagicError> for ParseError {
-    fn from(error: WrongMagicError) -> Self {
-        ParseError::BadMagic(error)
-    }
-}
-
-impl From<ChecksumError> for ParseError {
-    fn from(error: ChecksumError) -> Self {
-        ParseError::BadChecksum(error)
-    }
-}
-
-impl From<MissingDataError> for ParseError {
-    fn from(error: MissingDataError) -> Self {
-        ParseError::NotEnoughData(error)
-    }
+    #[error("Unsupported value in payload: {0}")]
+    PayloadUnsupportedValue(#[from] ExtraValueConversionError),
 }
 
 impl From<ciborium::de::Error<std::io::Error>> for ParseError {
@@ -64,18 +49,6 @@ impl From<ciborium::de::Error<std::io::Error>> for ParseError {
 impl From<ciborium::Value> for ParseError {
     fn from(error: ciborium::Value) -> Self {
         ParseError::PayloadWrongType(error)
-    }
-}
-
-impl From<TryFromIntError> for ParseError {
-    fn from(error: TryFromIntError) -> Self {
-        ParseError::PayloadOutOfBoundsInteger(error)
-    }
-}
-
-impl From<ExtraValueConversionError> for ParseError {
-    fn from(error: ExtraValueConversionError) -> Self {
-        ParseError::PayloadUnsupportedValue(error)
     }
 }
 

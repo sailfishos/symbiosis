@@ -12,7 +12,7 @@ use std::env::args;
 use std::error::Error;
 use std::time::Duration;
 use symbiosis::{
-    back_cover::{BackCover, Variant, WaitDisconnect},
+    back_cover::{BackCover, DetectionError, Variant, WaitDisconnect},
     dbus::server::Toh,
     toh::Detect,
 };
@@ -66,28 +66,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
         debug!("Looking for TOH");
         let back_cover = back_cover.wait_connect().await?;
         debug!("TOH connected");
-        let detect: Option<Box<dyn BackCoverDetect>> = match back_cover.power_up().await {
-            Ok(Variant::With256BBlocks(back_cover)) => {
-                debug!("Up to 256B block memory chip detected");
-                Some(Box::new(back_cover))
-            }
-            Ok(Variant::With64kBBlocks(back_cover)) => {
-                debug!("Up to 64k block memory chip detected");
-                // TODO: Implement
-                back_cover.wait_disconnect().await?;
-                None
-            }
-            Ok(Variant::Attached(back_cover)) => {
-                info!("Unsupported TOH type connected");
-                back_cover.wait_disconnect().await?;
-                None
-            }
-            Err(error) => {
-                warn!("TOH power up failed: {error}");
-                sleep(Duration::from_secs(10)).await;
-                None
-            }
-        };
+        let detect: Option<Box<dyn BackCoverDetect<Error = DetectionError>>> =
+            match back_cover.power_up().await {
+                Ok(Variant::With256BBlocks(back_cover)) => {
+                    debug!("Up to 256B block memory chip detected");
+                    Some(Box::new(back_cover))
+                }
+                Ok(Variant::With64kBBlocks(back_cover)) => {
+                    debug!("Up to 64k block memory chip detected");
+                    // TODO: Implement
+                    back_cover.wait_disconnect().await?;
+                    None
+                }
+                Ok(Variant::Attached(back_cover)) => {
+                    info!("Unsupported TOH type connected");
+                    back_cover.wait_disconnect().await?;
+                    None
+                }
+                Err(error) => {
+                    warn!("TOH power up failed: {error}");
+                    sleep(Duration::from_secs(10)).await;
+                    None
+                }
+            };
         // Wait a bit after powering up so the chip has a chance to be ready
         sleep(Duration::from_millis(100)).await;
         if let Some(mut back_cover) = detect {

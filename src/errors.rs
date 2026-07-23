@@ -2,21 +2,26 @@
 
 //! Error types.
 
+use thiserror::Error;
+
 /// Wrong magic errors.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
+#[error("Unexpected magic value: {value:?}")]
 pub struct WrongMagicError {
     pub value: [u8; 4],
 }
 
 /// Checksum errors.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
+#[error("Checksum did not match: {calculated} != {expected}")]
 pub struct ChecksumError {
     pub calculated: u32,
     pub expected: u32,
 }
 
 /// Less data received than expected.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
+#[error("Missing data: got {length} bytes, expected {expected} bytes")]
 pub struct MissingDataError {
     pub length: usize,
     pub expected: usize,
@@ -26,15 +31,19 @@ pub struct MissingDataError {
 /// CBOR payload parsing failed.
 ///
 /// Mirrors ciborium::de::Error.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum CBORParsingError {
     /// IO failure.
+    #[error("IO error while parsing CBOR")]
     Io,
     /// Syntax error at offset.
+    #[error("Syntax error in CBOR at offset {0}")]
     Syntax(usize),
     /// Semantic error with description and offset.
+    #[error("Semantic error in CBOR: {0}")]
     Semantic(String, Option<usize>),
     /// Serde tried to recurse too much.
+    #[error("Recursion limit exceeded in CBOR parsing")]
     RecursionLimitExceeded,
 }
 
@@ -51,12 +60,15 @@ impl From<ciborium::de::Error<std::io::Error>> for CBORParsingError {
 }
 
 /// Failed to convert some payload data.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum ExtraValueConversionError {
     /// Integer type is not yet supported.
+    #[error("Unsupported integer type")]
     UnsupportedIntegerType,
     /// Map keys were not all strings.
+    #[error("Some map keys were not strings")]
     MapKeysMustBeStrings,
     /// Unsupported value type encountered.
+    #[error("Unsupported value type")]
     UnsupportedValueType,
 }

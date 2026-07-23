@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use std::io::{self, ErrorKind, Read, Write};
 use std::marker::PhantomData;
 use std::time::Duration;
+use thiserror::Error;
 use tokio::time::sleep;
 
 pub(crate) mod paths {
@@ -210,14 +211,16 @@ impl<P: state::State + std::marker::Send> WaitDisconnect for BackCover<P> {
 
 #[async_trait]
 impl<P: state::State + std::marker::Send> IsPowered for BackCover<P> {
-    async fn is_powered(&mut self) -> io::Result<bool> {
+    type Error = io::Error;
+    async fn is_powered(&mut self) -> Result<bool, Self::Error> {
         self.pwr.is_powered()
     }
 }
 
 #[async_trait]
 impl<P: state::State + std::marker::Send> IsPresent for BackCover<P> {
-    async fn is_present(&mut self) -> io::Result<bool> {
+    type Error = io::Error;
+    async fn is_present(&mut self) -> Result<bool, Self::Error> {
         if self.read_int_state()? == IntState::Low {
             Ok(self.read_adc().await?.is_toh_present())
         } else {
@@ -255,9 +258,21 @@ impl BackCover<state::Present256BBlocks> {
     }
 }
 
+/// Error during TOH detection.
+#[derive(Debug, Error)]
+pub enum DetectionError {
+    /// IO error happened.
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    /// Parsing error happened.
+    #[error("Parsing error: {0}")]
+    Parse(#[from] ParseError),
+}
+
 #[async_trait]
 impl Detect for BackCover<state::Present256BBlocks> {
-    async fn detect(&mut self) -> Result<Option<Info>, DetectionError> {
+    type Error = DetectionError;
+    async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
         let content = self.read_chip()?;
         Ok(Some(Info::parse_from_bytes(&content)?))
     }

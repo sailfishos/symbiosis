@@ -17,7 +17,7 @@ use symbiosis::{
     toh::Detect,
 };
 use systemd_journal_logger::JournalLog;
-use tokio::time::sleep;
+use tokio::{select, time::sleep};
 use zbus::{fdo::ObjectManager, Connection};
 
 const SERVICE_NAME: &str = "org.sailfishos.tohd1";
@@ -60,6 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     object_server.at(SERVICE_PATH, ObjectManager).await?;
     connection.request_name(SERVICE_NAME).await?;
     debug!("Connected to D-Bus");
+    let mut unsupported_message_logged = false;
 
     loop {
         let back_cover = BackCover::new()?;
@@ -74,13 +75,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Ok(Variant::With64kBBlocks(back_cover)) => {
                     debug!("Up to 64k block memory chip detected");
-                    // TODO: Implement
-                    back_cover.wait_disconnect().await?;
-                    None
+                    Some(Box::new(back_cover))
                 }
                 Ok(Variant::Attached(back_cover)) => {
-                    info!("Unsupported TOH type connected");
-                    back_cover.wait_disconnect().await?;
+                    if !unsupported_message_logged {
+                        info!("Unsupported TOH type connected");
+                        unsupported_message_logged = true;
+                    }
+                    // Since this is fairly unlikely, we retry detection after some time even if the
+                    // TOH has not been disconnected.
+                    select! {
+                        result = back_cover.wait_disconnect() => {
+                            result?;
+                        }
+                        _ = sleep(Duration::from_secs(10)) => {}
+                    };
                     None
                 }
                 Err(error) => {
@@ -89,11 +98,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     None
                 }
             };
-        // Wait a bit after powering up so the chip has a chance to be ready
-        sleep(Duration::from_millis(100)).await;
         if let Some(mut back_cover) = detect {
-            // TODO: Detection might fail because the TOH has not yet properly connected => we
-            // should repeat until we get acknowledge or the TOH disconnects.
+            // Wait a bit after powering up so the chip has a chance to be ready
+            sleep(Duration::from_millis(100)).await;
             match back_cover.detect().await {
                 Ok(Some(info)) => {
                     let toh = Toh::new(info);
@@ -104,13 +111,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     object_server.remove::<Toh, _>(TOH_PATH).await?;
                 }
                 Ok(None) => {
-                    info!("TOH already disconnected");
+                    // TODO: Use more accurate warning here
+                    warn!("Memory chip content could not be fetched");
                 }
                 Err(error) => {
+                    // Reasons why this might happen include that TOH was not yet properly
+                    // connected, or the type might have been misdetected, so it is a good idea to
+                    // try again after a while.
                     warn!("Detecting TOH failed: {error:?}");
-                    sleep(Duration::from_secs(1)).await;
                 }
             }
+            sleep(Duration::from_secs(1)).await;
         };
     }
 }

@@ -278,4 +278,10 @@ impl Detect for BackCover<state::Present256BBlocks> {
     }
 }
 
-// TODO: Implement the functions for Present64kBBlocks too
+#[async_trait]
+impl Detect for BackCover<state::Present64kBBlocks> {
+    type Error = DetectionError;
+    async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
+        Ok(None) // TODO: Implement reading for Present64kBBlocks too
+    }
+}

@@ -12,7 +12,7 @@ use std::env::args;
 use std::error::Error;
 use std::time::Duration;
 use symbiosis::{
-    back_cover::{BackCover, DetectionError, Variant, WaitDisconnect},
+    back_cover::{BackCover, DetectionError, PowerDown, Variant, WaitDisconnect},
     dbus::server::Toh,
     toh::Detect,
 };
@@ -24,9 +24,17 @@ const SERVICE_NAME: &str = "org.sailfishos.tohd1";
 const SERVICE_PATH: &str = "/org/sailfishos/tohd1";
 const TOH_PATH: &str = "/org/sailfishos/tohd1/toh";
 
-trait BackCoverDetect: WaitDisconnect + Detect {}
+trait BackCoverDetect: WaitDisconnect + Detect + PowerDown {
+    // Rust 1.86.0 gets rid of this
+    fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect>;
+}
 
-impl<T: WaitDisconnect + Detect> BackCoverDetect for T {}
+impl<T: WaitDisconnect + Detect + PowerDown + 'static> BackCoverDetect for T {
+    // Rust 1.86.0 gets rid of this
+    fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect> {
+        self
+    }
+}
 
 // TODO: Use capabilities, no need to have root access to everything
 
@@ -103,10 +111,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
             sleep(Duration::from_millis(100)).await;
             match back_cover.detect().await {
                 Ok(Some(info)) => {
+                    let back_cover: Box<dyn WaitDisconnect> =
+                        if info.leave_power_on.unwrap_or(false) {
+                            back_cover.cast_to_wait_disconnect()
+                        } else {
+                            Box::new(back_cover.power_down_boxed()?)
+                        };
                     let toh = Toh::new(info);
                     object_server.at(TOH_PATH, toh).await?;
-                    // TODO: This should power down the TOH here if there is no need to keep it
-                    // powered
                     back_cover.wait_disconnect_boxed().await?;
                     object_server.remove::<Toh, _>(TOH_PATH).await?;
                 }

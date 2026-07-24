@@ -8,7 +8,7 @@ use std::io::Write;
 use std::time::Duration;
 use tokio::{select, time::sleep};
 
-use symbiosis::back_cover::{BackCover, Variant};
+use symbiosis::back_cover::{BackCover, PowerDown, Variant};
 
 /// TOH memory chip reader.
 ///

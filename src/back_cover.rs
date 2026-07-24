@@ -2,7 +2,7 @@
 
 //! TOH communication.
 //!
-//! Uses I²C and GPIO to talk with the TOH.
+//! Uses I²C and GPIO to talk with TOH.
 
 use crate::i2cdev::I2cDev;
 use crate::id::{AdcValue, Id, TohId};
@@ -167,9 +167,39 @@ impl<P: state::State + std::marker::Send> BackCover<P> {
         values.sort();
         Ok(values[2])
     }
+}
 
-    pub fn power_down(self) -> io::Result<BackCover<state::Detached>> {
-        BackCover::new()
+/// Trait for power_down.
+pub trait PowerDown {
+    /// Power down TOH.
+    fn power_down(self) -> io::Result<BackCover<state::Detached>>;
+
+    // NB: Just to workaround some inconveniences in Rust.
+    /// Power down TOH.
+    fn power_down_boxed(self: Box<Self>) -> io::Result<BackCover<state::Detached>>;
+}
+
+impl<P: state::State + std::marker::Send> PowerDown for BackCover<P> {
+    fn power_down(self) -> io::Result<BackCover<state::Detached>> {
+        let BackCover {
+            id,
+            i2c,
+            int,
+            mut pwr,
+            ..
+        } = self;
+        pwr.set_power(false)?;
+        Ok(BackCover {
+            id,
+            i2c,
+            int,
+            pwr,
+            _state: PhantomData,
+        })
+    }
+
+    fn power_down_boxed(self: Box<Self>) -> io::Result<BackCover<state::Detached>> {
+        self.power_down()
     }
 }
 

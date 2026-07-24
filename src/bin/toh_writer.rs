@@ -226,7 +226,7 @@ fn verify_chip(i2c: &mut I2CDev, file: &mut File) -> Result<(), Box<dyn std::err
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Arguments = argh::from_env();
     // TODO: Modprobe i2c-dev if it is not there yet
-    // TODO: Or use i2c-dev handed over by tohd interface if there is one
+    // TODO: This could also use a yaml file in the same format as create_toh_bin.
     let mut file = File::open(args.input_file)?;
     wait_for_int()?;
     test_adc_pin()?;

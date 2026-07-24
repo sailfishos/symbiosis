@@ -33,7 +33,7 @@ impl AdcValue {
         (0..1750).contains(&self.0)
     }
 
-    /// Identify the resistor in the TOH.
+    /// Identify the resistor in TOH.
     pub fn identify(&self) -> TohId {
         match self.0 {
             800..=999 => TohId::R10k,

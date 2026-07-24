@@ -6,7 +6,7 @@ use crate::back_cover::paths::I2C_PATH;
 use libc::{self, ioctl};
 use std::fs::File;
 use std::io::{Error, Read, Result, Write};
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::path::Path;
 
 // From Linux uapi
@@ -33,6 +33,12 @@ impl I2cDev {
     pub fn toh_dev() -> Result<Self> {
         // TODO: Get path properly to avoid accidentally writing something unintended
         I2cDev::new(I2C_PATH)
+    }
+
+    /// Create new instance from file descriptor.
+    pub(crate) fn from_fd(fd: OwnedFd) -> Self {
+        // TODO: Should this be able to fail somehow?
+        Self { file: fd.into() }
     }
 
     /// Set I²C device address.

@@ -114,6 +114,45 @@ impl TryFrom<ciborium::Value> for ExtraValue {
     }
 }
 
+impl<'a> TryFrom<&zvariant::Value<'a>> for ExtraValue {
+    type Error = ExtraValueConversionError;
+
+    fn try_from(value: &zvariant::Value<'a>) -> Result<Self, Self::Error> {
+        use ExtraValue::*;
+        use ExtraValueConversionError::*;
+        match value {
+            zvariant::Value::Bool(inner) => Ok(Boolean(*inner)),
+            zvariant::Value::U8(inner) => Ok(U64((*inner).into())),
+            zvariant::Value::I16(inner) => Ok(I64((*inner).into())),
+            zvariant::Value::U16(inner) => Ok(U64((*inner).into())),
+            zvariant::Value::I32(inner) => Ok(I64((*inner).into())),
+            zvariant::Value::U32(inner) => Ok(U64((*inner).into())),
+            zvariant::Value::I64(inner) => Ok(I64(*inner)),
+            zvariant::Value::U64(inner) => Ok(U64(*inner)),
+            zvariant::Value::F64(inner) => Ok(F64(*inner)),
+            zvariant::Value::Str(inner) => Ok(Text(inner.as_str().to_owned())),
+            zvariant::Value::Value(inner) => (&**inner).try_into(),
+            zvariant::Value::Array(inner) => Ok(Array(
+                inner
+                    .iter()
+                    .map(|value| value.try_into())
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            zvariant::Value::Dict(inner) => Ok(Map(inner
+                .iter()
+                .map(|(key, value)| {
+                    if let zvariant::Value::Str(key) = key {
+                        Ok((key.as_str().to_owned(), ExtraValue::try_from(value)?))
+                    } else {
+                        Err(MapKeysMustBeStrings)
+                    }
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()?)),
+            _ => Err(UnsupportedValueType),
+        }
+    }
+}
+
 /// Error for non-representable values from ExtraValue into zvariant::OwnedValue.
 ///
 /// Can be converted into &ExtraValue.

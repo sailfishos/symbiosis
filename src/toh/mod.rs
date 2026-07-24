@@ -2,8 +2,10 @@
 
 //! All generic TOH related things.
 
+mod client;
 mod info;
 pub mod traits;
 
+pub use client::{FetchingInfoError, Toh};
 pub use info::*;
 pub use traits::*;

@@ -36,6 +36,14 @@ Provides: toh-tools = %{version}-%{release}
 %description tools
 %{summary}.
 
+%package examples
+Summary:  Examples for %{name}
+Provides: toh-tools = %{version}-%{release}
+Requires: %{name} = %{version}-%{release}
+
+%description examples
+%{summary}.
+
 %prep
 %autosetup -a1 -n %{name}-%{version}
 
@@ -73,9 +81,9 @@ export CARGO_OFFLINE="%{_cargo_offline}"
 # Forcing cargo builds to use a single core in order to make it build more
 # reliably. Let's revisit when we upgrade rust. JB#53588
 %ifarch %arm aarch64
-cargo build -j1 $CARGO_OFFLINE --locked --target $SB2_RUST_TARGET_TRIPLE --release
+cargo build -j1 $CARGO_OFFLINE --locked --target $SB2_RUST_TARGET_TRIPLE --release --all-targets
 %else
-cargo build -j1 $CARGO_OFFLINE --locked --release
+cargo build -j1 $CARGO_OFFLINE --locked --release --all-targets
 %endif
 
 %install
@@ -91,6 +99,7 @@ install -D -m0755 %{rustbuilddir}/%{name} %{buildroot}%{_bindir}/%{name}
 install -D -m0755 %{rustbuilddir}/create_toh_bin %{buildroot}%{_bindir}/create_toh_bin
 install -D -m0755 %{rustbuilddir}/toh_reader %{buildroot}%{_sbindir}/toh_reader
 install -D -m0755 %{rustbuilddir}/toh_writer %{buildroot}%{_sbindir}/toh_writer
+install -D -m0755 %{rustbuilddir}/examples/blinker %{buildroot}%{_bindir}/blinker
 
 # Systemd unit files and D-Bus configuration
 install -D -m0644 %{SOURCE101} %{buildroot}%{systemunitdir}/%{name}.service
@@ -122,3 +131,6 @@ systemctl daemon-reload || :
 %{_bindir}/create_toh_bin
 %{_sbindir}/toh_reader
 %{_sbindir}/toh_writer
+
+%files examples
+%{_bindir}/blinker

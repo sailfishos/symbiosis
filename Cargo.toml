@@ -26,3 +26,6 @@ zvariant = "4.2.0"
 
 [profile.release]
 strip = "symbols"
+
+[dev-dependencies]
+num_enum = "0.7.6"

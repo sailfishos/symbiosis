@@ -51,11 +51,25 @@ pub trait Toh {
 
     /// Borrow i2c-dev access to the I²C bus.
     ///
+    /// Also powers up the TOH if it was powered down.
+    ///
     /// Currently only available for processes running as root.
     async fn borrow_i2c_dev_access(&mut self) -> Result<OwnedFd, BorrowError>;
 
+    /// Borrow i2c-dev access to the I²C bus.
+    ///
+    /// Set leave_power_on to true if you want the power to stay on after returning the access.
+    ///
+    /// See also borrow_i2c_dev_access.
+    async fn borrow_i2c_dev_access_with_power(
+        &mut self,
+        leave_power_on: bool,
+    ) -> Result<OwnedFd, BorrowError>;
+
     /// Return i2c-dev access to the I²C bus.
     ///
-    /// Only available to the process that had borrowed it.
+    /// Also powers down the TOH.
+    ///
+    /// Only available to the process that had borrowed the access.
     fn return_i2c_dev_access(&mut self) -> Result<(), ReturnError>;
 }

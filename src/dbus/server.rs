@@ -3,15 +3,20 @@
 //! D-Bus server side stuff.
 
 use super::error::*;
-use crate::{i2cdev::I2cDev, toh::Info};
+use crate::{i2cdev::I2cDev, power::Power, toh::Info};
 use std::collections::HashMap;
 use std::os::fd::AsFd;
+use std::time::Duration;
+use tokio::time::sleep;
 use zbus::{fdo::DBusProxy, interface, message::Header, names::UniqueName, Connection};
 use zvariant::{Fd, Optional, OwnedValue};
 
 // TODO: Similar borrowing interface for interrupts from TOH:
 // I.e. the service should monitor interrupt pin and react differently to disconnects and TOH
 // mcu initiated interrupts.
+
+// TODO: Add watching for the client that has borrowed i2c-dev so that we power TOH down if the
+// client leaves the bus.
 
 /// Representation of lent out i2c-dev access.
 ///
@@ -27,6 +32,8 @@ struct Loan {
     /// D-Bus bus name of the process that borrowed the file descriptor.
     owner: UniqueName<'static>,
     // TODO: This could keep a pidfd for the process too.
+    /// Power down after use.
+    power_down: bool,
 }
 
 /// Representation of TOH on D-Bus.
@@ -39,6 +46,52 @@ impl Toh {
     /// Create new representation from TOH info.
     pub fn new(info: Info) -> Self {
         Self { info, loan: None }
+    }
+}
+
+impl Toh {
+    async fn lend_i2c_dev(
+        &mut self,
+        leave_power_on: Option<bool>,
+        header: Header<'_>,
+        connection: &Connection,
+    ) -> Result<Fd<'static>, BorrowError> {
+        // TODO: Maybe we could do powering down conditionally a bit smarter with some guard type.
+        let mut power_down = false;
+        let sender = header.sender().ok_or(BorrowError::NoSender)?.to_owned();
+        let proxy = DBusProxy::new(connection).await?;
+        if let Some(loan) = &self.loan {
+            if proxy.name_has_owner(loan.owner.clone().into()).await? {
+                return Err(BorrowError::AlreadyBorrowed);
+            } else {
+                // Loan has expired, we can lend it again.
+                power_down = loan.power_down;
+                self.loan = None
+            }
+        }
+        let uid = proxy
+            .get_connection_unix_user(sender.clone().into())
+            .await?;
+        // TODO: Add access for privileged group
+        if uid == 0 {
+            // Enable power for the duration of the loan.
+            Power::new().and_then(|mut pwr| pwr.set_power(true))?;
+            sleep(Duration::from_millis(100)).await;
+            // Currently only root can get access to the file descriptor.
+            // This may be later extended to allow for some other conditions too.
+            let fd = I2cDev::toh_dev()?.as_fd().try_clone_to_owned()?;
+            self.loan = Some(Loan {
+                owner: sender,
+                power_down: !leave_power_on
+                    .unwrap_or_else(|| self.info.leave_power_on.unwrap_or(false)),
+            });
+            Ok(Fd::Owned(fd))
+        } else {
+            if power_down {
+                Power::new().and_then(|mut pwr| pwr.set_power(false))?;
+            }
+            Err(BorrowError::AccessDenied)
+        }
     }
 }
 
@@ -113,40 +166,37 @@ impl Toh {
 
     /// Borrow i2c-dev access to the I²C bus.
     ///
+    /// Also powers up the TOH if it was powered down.
+    ///
     /// Currently only available for processes running as root.
     async fn borrow_i2c_dev_access(
         &mut self,
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] connection: &Connection,
     ) -> Result<Fd<'static>, BorrowError> {
-        let sender = header.sender().ok_or(BorrowError::NoSender)?.to_owned();
-        let proxy = DBusProxy::new(connection).await?;
-        // TODO: Check if caller has sufficient access rights
-        if let Some(loan) = &self.loan {
-            if proxy.name_has_owner(loan.owner.clone().into()).await? {
-                return Err(BorrowError::AlreadyBorrowed);
-            } else {
-                // Loan has expired, we can lend it again.
-                self.loan = None
-            }
-        }
-        let uid = proxy
-            .get_connection_unix_user(sender.clone().into())
-            .await?;
-        if uid == 0 {
-            // Currently only root can get access to the file descriptor.
-            // This may be later extended to allow for some other conditions too.
-            let fd = I2cDev::toh_dev()?.as_fd().try_clone_to_owned()?;
-            self.loan = Some(Loan { owner: sender });
-            Ok(Fd::Owned(fd))
-        } else {
-            Err(BorrowError::AccessDenied)
-        }
+        self.lend_i2c_dev(None, header, connection).await
+    }
+
+    /// Borrow i2c-dev access to the I²C bus.
+    ///
+    /// Set leave_power_on to true if you want the power to stay on after returning the access.
+    ///
+    /// See also borrow_i2c_dev_access.
+    async fn borrow_i2c_dev_access_with_power(
+        &mut self,
+        leave_power_on: bool,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &Connection,
+    ) -> Result<Fd<'static>, BorrowError> {
+        self.lend_i2c_dev(Some(leave_power_on), header, connection)
+            .await
     }
 
     /// Return i2c-dev access to the I²C bus.
     ///
-    /// Only available to the process that had borrowed it.
+    /// Also powers down the TOH.
+    ///
+    /// Only available to the process that had borrowed the access.
     fn return_i2c_dev_access(
         &mut self,
         #[zbus(header)] header: Header<'_>,
@@ -154,8 +204,13 @@ impl Toh {
         if let Some(loan) = &self.loan {
             if let Some(sender) = header.sender() {
                 if loan.owner == *sender {
+                    let result = if loan.power_down {
+                        Power::new().and_then(|mut pwr| pwr.set_power(false))
+                    } else {
+                        Ok(())
+                    };
                     self.loan = None;
-                    return Ok(());
+                    return result.map_err(|e| e.into());
                 }
             } else {
                 return Err(ReturnError::NoSender);

@@ -41,7 +41,15 @@ pub enum ReturnError {
     NoLoan,
     /// No sender in message header.
     NoSender,
+    /// Failed to power down.
+    PowerDownFailed,
     /// Internal errors or anything else.
     #[zbus(error)]
     ZBus(zbus::Error),
+}
+
+impl From<std::io::Error> for ReturnError {
+    fn from(_error: std::io::Error) -> Self {
+        ReturnError::PowerDownFailed
+    }
 }

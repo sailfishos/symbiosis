@@ -13,11 +13,12 @@ use std::path::Path;
 const I2C_SLAVE: libc::c_ulong = 0x0703;
 
 /// Use i2c-dev driver to talk with I²C bus.
-pub struct I2CDev {
+#[derive(Debug)]
+pub struct I2cDev {
     file: File,
 }
 
-impl I2CDev {
+impl I2cDev {
     /// Create new instance for path.
     ///
     /// The path should be a device file like "/dev/i2c-0".
@@ -31,7 +32,7 @@ impl I2CDev {
     /// Create new instance for TOH I²C bus.
     pub fn toh_dev() -> Result<Self> {
         // TODO: Get path properly to avoid accidentally writing something unintended
-        I2CDev::new(I2C_PATH)
+        I2cDev::new(I2C_PATH)
     }
 
     /// Set I²C device address.
@@ -47,13 +48,13 @@ impl I2CDev {
     }
 }
 
-impl Read for I2CDev {
+impl Read for I2cDev {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         self.file.read(buf)
     }
 }
 
-impl Write for I2CDev {
+impl Write for I2cDev {
     fn write(&mut self, buf: &[u8]) -> Result<usize> {
         self.file.write(buf)
     }

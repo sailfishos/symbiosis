@@ -10,7 +10,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use symbiosis::back_cover::paths::I2C_PATH;
-use symbiosis::i2cdev::I2CDev;
+use symbiosis::i2cdev::I2cDev;
 use symbiosis::id::{Id, TohId};
 use symbiosis::interrupt::{IntState, Interrupt};
 use symbiosis::power::Power;
@@ -96,7 +96,7 @@ fn get_file_size(file: &mut File) -> Result<u64, std::io::Error> {
 
 /// Use I²C to write the chip
 fn write_chip(
-    i2c: &mut I2CDev,
+    i2c: &mut I2cDev,
     file: &mut File,
     page_size: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -148,7 +148,7 @@ fn write_chip(
 }
 
 /// Use I²C to verify the chip
-fn verify_chip(i2c: &mut I2CDev, file: &mut File) -> Result<(), Box<dyn std::error::Error>> {
+fn verify_chip(i2c: &mut I2cDev, file: &mut File) -> Result<(), Box<dyn std::error::Error>> {
     // Let's check how many bytes we have to verify
     let size = get_file_size(file)?;
 
@@ -231,7 +231,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     wait_for_int()?;
     test_adc_pin()?;
     with_power(|| {
-        let mut i2c = I2CDev::new(I2C_PATH)?;
+        let mut i2c = I2cDev::new(I2C_PATH)?;
         write_chip(&mut i2c, &mut file, args.page_size.into())
             .and_then(|()| verify_chip(&mut i2c, &mut file))
     })

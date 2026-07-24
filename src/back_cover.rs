@@ -4,7 +4,7 @@
 //!
 //! Uses I²C and GPIO to talk with the TOH.
 
-use crate::i2cdev::I2CDev;
+use crate::i2cdev::I2cDev;
 use crate::id::{AdcValue, Id, TohId};
 use crate::interrupt::{IntState, Interrupt};
 use crate::power::Power;
@@ -49,7 +49,7 @@ mod state {
 /// TOH implementation that talks via I²C and GPIO.
 pub struct BackCover<P: state::State + std::marker::Send> {
     id: Id,
-    i2c: I2CDev,
+    i2c: I2cDev,
     int: Interrupt,
     pwr: Power,
     _state: PhantomData<P>,
@@ -76,7 +76,7 @@ impl BackCover<state::Detached> {
         Ok(Self {
             id: Id::new()?,
             int: Interrupt::new()?,
-            i2c: I2CDev::toh_dev()?,
+            i2c: I2cDev::toh_dev()?,
             pwr,
             _state: PhantomData,
         })

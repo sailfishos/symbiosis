@@ -9,7 +9,6 @@ use std::ops::Rem;
 use std::thread::sleep;
 use std::time::Duration;
 
-use symbiosis::back_cover::paths::I2C_PATH;
 use symbiosis::i2cdev::I2cDev;
 use symbiosis::id::{Id, TohId};
 use symbiosis::interrupt::{IntState, Interrupt};
@@ -231,7 +230,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     wait_for_int()?;
     test_adc_pin()?;
     with_power(|| {
-        let mut i2c = I2cDev::new(I2C_PATH)?;
+        let mut i2c = I2cDev::toh_dev()?;
         write_chip(&mut i2c, &mut file, args.page_size.into())
             .and_then(|()| verify_chip(&mut i2c, &mut file))
     })

@@ -4,7 +4,10 @@
 
 use super::error::*;
 use crate::{i2cdev::I2cDev, power::Power, toh::Info};
+use log::warn;
+use nix::unistd::Group;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::os::fd::AsFd;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -40,12 +43,24 @@ struct Loan {
 pub struct Toh {
     info: Info,
     loan: Option<Loan>,
+    privileged_group: Option<NonZeroU32>,
 }
 
 impl Toh {
     /// Create new representation from TOH info.
     pub fn new(info: Info) -> Self {
-        Self { info, loan: None }
+        let privileged_group = Group::from_name("privileged")
+            .ok()
+            .flatten()
+            .and_then(|group| NonZeroU32::new(group.gid.as_raw()));
+        if privileged_group.is_none() {
+            warn!("Privileged gid could not be fetched, methods are not available for privileged group");
+        }
+        Self {
+            info,
+            loan: None,
+            privileged_group,
+        }
     }
 }
 
@@ -69,16 +84,31 @@ impl Toh {
                 self.loan = None
             }
         }
-        let uid = proxy
-            .get_connection_unix_user(sender.clone().into())
+        let creds = proxy
+            .get_connection_credentials(sender.clone().into())
             .await?;
-        // TODO: Add access for privileged group
-        if uid == 0 {
+        // NB: We cannot use creds.unix_group_ids() because D-Bus does not populate it
+        let ok = if creds.unix_user_id().ok_or(BorrowError::NoUid)? == 0 {
+            // Root is always okay
+            true
+        } else if let Some(privileged_group) = self.privileged_group {
+            // Privileged group is something special on Sailfish OS
+            let pid: i32 = creds
+                .process_id()
+                .expect("Process ID is available on Linux")
+                .try_into()
+                .expect("Process ID fits into i32 as it is lower than 4194304");
+            let status = procfs::process::Process::new(pid)?.status()?;
+            status.egid == privileged_group.into()
+                || status.groups.contains(&privileged_group.into())
+        } else {
+            // Currently no-one else can access this
+            false
+        };
+        if ok {
             // Enable power for the duration of the loan.
             Power::new().and_then(|mut pwr| pwr.set_power(true))?;
             sleep(Duration::from_millis(100)).await;
-            // Currently only root can get access to the file descriptor.
-            // This may be later extended to allow for some other conditions too.
             let fd = I2cDev::toh_dev()?.as_fd().try_clone_to_owned()?;
             self.loan = Some(Loan {
                 owner: sender,
@@ -168,7 +198,7 @@ impl Toh {
     ///
     /// Also powers up the TOH if it was powered down.
     ///
-    /// Currently only available for processes running as root.
+    /// Currently only available for processes running as root or as privileged group.
     async fn borrow_i2c_dev_access(
         &mut self,
         #[zbus(header)] header: Header<'_>,

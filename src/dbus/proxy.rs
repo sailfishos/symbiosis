@@ -53,7 +53,7 @@ pub trait Toh {
     ///
     /// Also powers up the TOH if it was powered down.
     ///
-    /// Currently only available for processes running as root.
+    /// Currently only available for processes running as root or as privileged group.
     async fn borrow_i2c_dev_access(&mut self) -> Result<OwnedFd, BorrowError>;
 
     /// Borrow i2c-dev access to the I²C bus.

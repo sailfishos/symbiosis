@@ -15,6 +15,10 @@ pub enum BorrowError {
     AlreadyBorrowed,
     /// No sender in message header.
     NoSender,
+    /// No uid in credentials returned by D-Bus.
+    NoUid,
+    /// No process status or process status could not be fetched.
+    NoProcessStatus,
     /// IO error.
     IOError,
     /// Internal errors or anything else.
@@ -31,6 +35,12 @@ impl From<zbus::fdo::Error> for BorrowError {
 impl From<std::io::Error> for BorrowError {
     fn from(_error: std::io::Error) -> Self {
         BorrowError::IOError
+    }
+}
+
+impl From<procfs::ProcError> for BorrowError {
+    fn from(_error: procfs::ProcError) -> Self {
+        BorrowError::NoProcessStatus
     }
 }
 

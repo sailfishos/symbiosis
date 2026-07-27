@@ -13,9 +13,8 @@ use async_trait::async_trait;
 use std::io::{self, ErrorKind, Read, Write};
 use std::marker::PhantomData;
 
-// TODO: Make this private to the crate once there are no external users
-pub mod paths {
-    pub const I2C_PATH: &str = "/dev/i2c-0";
+pub(crate) mod paths {
+    pub(crate) const I2C_PATH: &str = "/dev/i2c-0";
     pub(crate) const PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
     pub(crate) const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
     pub(crate) const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";

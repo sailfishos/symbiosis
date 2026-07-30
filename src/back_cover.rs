@@ -312,6 +312,9 @@ impl Detect for BackCover<state::Present256BBlocks> {
 impl Detect for BackCover<state::Present64kBBlocks> {
     type Error = DetectionError;
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
+        // TODO: We need to consider how we make the ID value detection so robust that we don't
+        // accidentally rewrite the first byte on those 8-bit memory chips,
+        // or alternatively we need to do this in a way that does not result in overwrites.
         Ok(None) // TODO: Implement reading for Present64kBBlocks too
     }
 }

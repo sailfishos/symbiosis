@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Jolla Mobile Ltd
 
-//! TOH interface.
+//! TOH interface traits.
 
 use super::info::*;
 use async_trait::async_trait;

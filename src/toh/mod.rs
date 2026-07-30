@@ -5,7 +5,9 @@
 mod client;
 mod info;
 pub mod traits;
+mod value;
 
 pub use client::{FetchingInfoError, Toh};
 pub use info::*;
 pub use traits::*;
+pub use value::ExtraValue;

@@ -14,7 +14,7 @@ use std::time::Duration;
 use symbiosis::{
     back_cover::{BackCover, DetectionError, PowerDown, Variant, WaitDisconnect},
     dbus::server::Toh,
-    toh::Detect,
+    toh::{Detect, IsPresent},
 };
 use systemd_journal_logger::JournalLog;
 use tokio::{select, time::sleep};
@@ -70,9 +70,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     debug!("Connected to D-Bus");
     let mut unsupported_message_logged = false;
 
+    // After start, check if the cover is already present so we can skip some of the
+    // services from starting. Useful e.g. to avoid changing ambience on boot or service
+    // restart.
+    let mut toh_already_present = true;
+
     loop {
-        let back_cover = BackCover::new()?;
-        debug!("Looking for TOH");
+        let mut back_cover = BackCover::new()?;
+        if toh_already_present {
+            // Checking (again) if TOH is there. Error cases end up here and usually we loop again
+            // back here after TOH has been removed.
+            toh_already_present = back_cover.is_present().await?;
+        }
+        if !toh_already_present {
+            debug!("Looking for TOH");
+        }
         let back_cover = back_cover.wait_connect().await?;
         debug!("TOH connected");
         let detect: Option<Box<dyn BackCoverDetect<Error = DetectionError>>> =
@@ -128,7 +140,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     let toh = Toh::new(info);
                     object_server.at(TOH_PATH, toh).await?;
                     if let Some(configs) = configs.as_ref() {
-                        configs.start_units().await;
+                        // toh_already_present <=> service is starting + TOH is connected
+                        configs.start_units(toh_already_present).await;
                     }
                     back_cover.wait_disconnect_boxed().await?;
                     if let Some(configs) = configs.as_ref() {

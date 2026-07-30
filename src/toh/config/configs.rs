@@ -123,11 +123,15 @@ impl Configs {
         info.extra.extend(overrides.extra);
     }
 
-    pub async fn start_units(&self) {
+    pub async fn start_units(&self, on_service_start: bool) {
         if !self.system_units.is_empty() {
             match Manager::system().await {
                 Ok(mut manager) => {
-                    for unit in &self.system_units {
+                    for unit in self
+                        .system_units
+                        .iter()
+                        .filter(|unit| !on_service_start || unit.run_on_start)
+                    {
                         log::debug!("Starting {} in system session", unit.name);
                         if let Err(error) = manager.start_unit(unit).await {
                             log::warn!("Failed to start unit {}: {error}", unit.name);
@@ -142,7 +146,11 @@ impl Configs {
         if !self.user_units.is_empty() {
             match Manager::session().await {
                 Ok(mut manager) => {
-                    for unit in &self.user_units {
+                    for unit in self
+                        .user_units
+                        .iter()
+                        .filter(|unit| !on_service_start || unit.run_on_start)
+                    {
                         log::debug!("Starting {} in user session", unit.name);
                         if let Err(error) = manager.start_unit(unit).await {
                             log::warn!("Failed to start unit {}: {error}", unit.name);
@@ -250,12 +258,14 @@ system-unit:
   service-name: another-one
   service-exec: [\"/usr/bin/false\"]
   service-exec-stop: [\"/usr/bin/true\"]
+  run-on-start: false
 ",
         )
         .unwrap();
         assert!(config.overrides.is_none());
         let unit = config.user_unit.unwrap();
         assert_eq!(unit.name, "my-test-unit");
+        assert!(unit.run_on_start);
         assert!(matches!(unit.unit_type, parse::Unit::TransientService(_)));
         let parse::Unit::TransientService(service) = unit.unit_type else {
             panic!("Impossible")
@@ -269,6 +279,7 @@ system-unit:
         assert!(service.exec_stop.is_none());
         let unit = config.system_unit.unwrap();
         assert_eq!(unit.name, "another-one");
+        assert!(!unit.run_on_start);
         assert!(matches!(unit.unit_type, parse::Unit::TransientService(_)));
         let parse::Unit::TransientService(service) = unit.unit_type else {
             panic!("Impossible")

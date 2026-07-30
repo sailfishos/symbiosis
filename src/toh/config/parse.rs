@@ -51,10 +51,17 @@ pub(crate) struct Override {
     pub extra: HashMap<String, ExtraValue>,
 }
 
+fn yes() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) struct SystemdUnit {
     #[serde(rename = "service-name")]
     pub name: String,
+    #[serde(default = "yes")]
+    pub run_on_start: bool,
     #[serde(flatten, rename = "type")]
     pub unit_type: Unit,
 }

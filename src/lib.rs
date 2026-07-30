@@ -9,4 +9,5 @@ pub mod i2cdev;
 pub mod id;
 pub mod interrupt;
 pub mod power;
+mod systemd;
 pub mod toh;

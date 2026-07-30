@@ -24,6 +24,48 @@ pub enum ExtraValue {
     Map(BTreeMap<String, ExtraValue>),
 }
 
+impl TryFrom<yaml_serde::Value> for ExtraValue {
+    type Error = ExtraValueConversionError;
+
+    fn try_from(value: yaml_serde::Value) -> Result<Self, Self::Error> {
+        use ExtraValue::*;
+        use ExtraValueConversionError::*;
+        match value {
+            yaml_serde::Value::Number(value) => {
+                if let Some(value) = value.as_u64() {
+                    Ok(U64(value))
+                } else if let Some(value) = value.as_i64() {
+                    Ok(I64(value))
+                } else if let Some(value) = value.as_f64() {
+                    Ok(F64(value))
+                } else {
+                    Err(UnsupportedIntegerType)
+                }
+            }
+            yaml_serde::Value::String(value) => Ok(Text(value)),
+            yaml_serde::Value::Bool(value) => Ok(Boolean(value)),
+            yaml_serde::Value::Null => Ok(Null),
+            yaml_serde::Value::Sequence(value) => Ok(Array(
+                value
+                    .into_iter()
+                    .map(ExtraValue::try_from)
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            yaml_serde::Value::Mapping(value) => Ok(Map(value
+                .into_iter()
+                .map(|(inner_key, inner_value)| {
+                    if let yaml_serde::Value::String(inner_key) = inner_key {
+                        Ok((inner_key, ExtraValue::try_from(inner_value)?))
+                    } else {
+                        Err(MapKeysMustBeStrings)
+                    }
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()?)),
+            _ => Err(UnsupportedValueType),
+        }
+    }
+}
+
 impl TryFrom<ciborium::Value> for ExtraValue {
     type Error = ExtraValueConversionError;
 

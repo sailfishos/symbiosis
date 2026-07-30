@@ -1,0 +1,284 @@
+// Copyright (c) 2026 Jolla Mobile Ltd
+
+//! TOH configs.
+//!
+//! These are yaml files that are on the device, they can override values provided by the memory
+//! chip and extend TOH functionality by executing services on TOH connect.
+
+use super::parse::{self, combine};
+use crate::systemd::Manager;
+use crate::toh::Info;
+use std::fs::read_dir;
+use std::path::PathBuf;
+use thiserror::Error;
+use yaml_serde::Error as YamlError;
+
+mod paths {
+    pub const CONFIG_PATH: &str = "/usr/share/tohd-1/tohs/";
+}
+
+/// Reading configs failed.
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    /// IO error while looking for config files for TOH.
+    #[error("IO error: {0}")]
+    IOError(#[from] std::io::Error),
+    /// IO error while reading a config file.
+    #[error("IO error in '{0}': {1}")]
+    IOErrorWithFile(PathBuf, std::io::Error),
+    /// Parsing error.
+    #[error("YAML parsing error in '{0}': {1}")]
+    ParsingError(PathBuf, YamlError),
+}
+
+/// Configs for TOH.
+#[derive(Debug, Clone, Default)]
+pub struct Configs {
+    overrides: parse::Override,
+    system_units: Vec<parse::SystemdUnit>,
+    user_units: Vec<parse::SystemdUnit>,
+}
+
+impl Configs {
+    pub(crate) fn find(vendor_id: u16, product_id: u16) -> Result<Option<Self>, ConfigError> {
+        // Config files are in paths::CONFIG_PATH/vendor_id/product_id directory
+        let mut path = PathBuf::from(paths::CONFIG_PATH);
+        path.push(format!("{:04x}", vendor_id));
+        path.push(format!("{:04x}", product_id));
+        if !std::fs::metadata(&path)
+            .as_ref()
+            .is_ok_and(std::fs::Metadata::is_dir)
+        {
+            return Ok(None);
+        }
+        // TODO: The directory could have been deleted between the check and this
+        let mut paths: Vec<PathBuf> = read_dir(&path)?
+            .filter_map(|entry| match entry {
+                Ok(entry) => {
+                    let path = entry.path();
+                    if path
+                        .extension()
+                        .and_then(std::ffi::OsStr::to_str)
+                        .map(|ex| ex == "yaml")
+                        .unwrap_or(false)
+                    {
+                        Some(Ok(path))
+                    } else {
+                        None
+                    }
+                }
+                Err(error) => Some(Err(error)),
+            })
+            .collect::<Result<_, _>>()?;
+        if paths.is_empty() {
+            Ok(None)
+        } else {
+            // Deterministic order and also allows xx-name.yaml notation if needed
+            paths.sort();
+
+            let mut configs = Configs::default();
+            paths
+                .into_iter()
+                .map(|path| {
+                    parse::Config::from_path(&path).map_err(|error| {
+                        use parse::ParsingError::*;
+                        match error {
+                            IOError(error) => ConfigError::IOErrorWithFile(path.clone(), error),
+                            ParsingError(error) => ConfigError::ParsingError(path.clone(), error),
+                        }
+                    })
+                })
+                .try_for_each(|config| config.map(|config| configs.update(config)))?;
+            Ok(Some(configs))
+        }
+    }
+
+    fn update(&mut self, config: parse::Config) {
+        let parse::Config {
+            overrides,
+            system_unit,
+            user_unit,
+        } = config;
+        if let Some(overrides) = overrides {
+            self.overrides.with_other(overrides);
+        }
+        if let Some(system_unit) = system_unit {
+            self.system_units.push(system_unit);
+        }
+        if let Some(user_unit) = user_unit {
+            self.user_units.push(user_unit);
+        }
+    }
+
+    pub(crate) fn apply_overrides(&self, info: &mut Info) {
+        // TODO: Avoid clone, for example by splitting Configs to suitable parts
+        let overrides = self.overrides.clone();
+        // If we had even more of these, it would probably make sense to write a derive macro.
+        combine!(info, overrides, vendor_name);
+        combine!(info, overrides, product_name);
+        combine!(info, overrides, vendor_website);
+        combine!(info, overrides, product_website);
+        combine!(info, overrides, leave_power_on);
+        combine!(info, overrides, power_input_toh);
+        info.extra.extend(overrides.extra);
+    }
+
+    pub async fn start_units(&self) {
+        if !self.system_units.is_empty() {
+            match Manager::system().await {
+                Ok(mut manager) => {
+                    for unit in &self.system_units {
+                        log::debug!("Starting {} in system session", unit.name);
+                        if let Err(error) = manager.start_unit(unit).await {
+                            log::warn!("Failed to start unit {}: {error}", unit.name);
+                        }
+                    }
+                }
+                Err(error) => {
+                    log::error!("Failed to access system manager: {error}");
+                }
+            }
+        }
+        if !self.user_units.is_empty() {
+            match Manager::session().await {
+                Ok(mut manager) => {
+                    for unit in &self.user_units {
+                        log::debug!("Starting {} in user session", unit.name);
+                        if let Err(error) = manager.start_unit(unit).await {
+                            log::warn!("Failed to start unit {}: {error}", unit.name);
+                        }
+                    }
+                }
+                Err(error) => {
+                    log::error!("Failed to access user manager: {error}");
+                }
+            }
+        }
+    }
+
+    pub async fn stop_units(&self) {
+        if !self.system_units.is_empty() {
+            match Manager::system().await {
+                Ok(mut manager) => {
+                    for unit in &self.system_units {
+                        log::debug!("Stopping {} in system session", unit.name);
+                        if let Err(error) = manager.stop_unit(unit).await {
+                            log::warn!("Failed to stop unit {}: {error}", unit.name);
+                        }
+                    }
+                }
+                Err(error) => {
+                    log::error!("Failed to access system manager: {error}");
+                }
+            }
+        }
+        if !self.user_units.is_empty() {
+            match Manager::session().await {
+                Ok(mut manager) => {
+                    for unit in &self.user_units {
+                        log::debug!("Stopping {} in user session", unit.name);
+                        if let Err(error) = manager.stop_unit(unit).await {
+                            log::warn!("Failed to stop unit {}: {error}", unit.name);
+                        }
+                    }
+                }
+                Err(error) => {
+                    log::error!("Failed to access user manager: {error}");
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_overrides() {
+        let config: parse::Config = yaml_serde::from_str(
+            "
+--- # Testing overrides here
+override:
+  vendor-name: testy
+  product-name: tester
+  vendor-website: https://example.com/
+  leave-power-on: true
+  power-input-toh: false
+  some-text: testing out
+  a-boolean: false
+",
+        )
+        .unwrap();
+        let overrides = config.overrides.unwrap();
+        assert_eq!(overrides.vendor_name, Some("testy".to_string()));
+        assert_eq!(overrides.product_name, Some("tester".to_string()));
+        assert_eq!(
+            overrides.vendor_website,
+            Some("https://example.com/".to_string())
+        );
+        assert_eq!(overrides.product_website, None);
+        assert_eq!(overrides.leave_power_on, Some(true));
+        assert_eq!(overrides.power_input_toh, Some(false));
+        assert_eq!(
+            overrides.extra.get("some-text"),
+            Some(&"testing out".to_string().into())
+        );
+        assert_eq!(overrides.extra.get("a-boolean"), Some(&false.into()));
+        assert!(config.system_unit.is_none());
+        assert!(config.user_unit.is_none());
+    }
+
+    #[test]
+    fn parse_unit() {
+        let config: parse::Config = yaml_serde::from_str(
+            "
+--- # Just some transient units to check
+user-unit:
+  description: My Test Unit
+  type: transient-service
+  service-type: oneshot
+  service-name: my-test-unit
+  service-exec:
+    - \"/path/to/binary\"
+    - \"arg1\"
+    - \"arg2\"
+
+system-unit:
+  description: Such a failure
+  type: transient-service
+  service-name: another-one
+  service-exec: [\"/usr/bin/false\"]
+  service-exec-stop: [\"/usr/bin/true\"]
+",
+        )
+        .unwrap();
+        assert!(config.overrides.is_none());
+        let unit = config.user_unit.unwrap();
+        assert_eq!(unit.name, "my-test-unit");
+        assert!(matches!(unit.unit_type, parse::Unit::TransientService(_)));
+        let parse::Unit::TransientService(service) = unit.unit_type else {
+            panic!("Impossible")
+        };
+        assert_eq!(service.description, "My Test Unit");
+        assert_eq!(service.service_type, parse::ServiceType::Oneshot);
+        assert_eq!(
+            service.exec,
+            vec!["/path/to/binary", "arg1", "arg2"].try_into().unwrap()
+        );
+        assert!(service.exec_stop.is_none());
+        let unit = config.system_unit.unwrap();
+        assert_eq!(unit.name, "another-one");
+        assert!(matches!(unit.unit_type, parse::Unit::TransientService(_)));
+        let parse::Unit::TransientService(service) = unit.unit_type else {
+            panic!("Impossible")
+        };
+        assert_eq!(service.description, "Such a failure");
+        assert_eq!(service.service_type, parse::ServiceType::Simple);
+        assert_eq!(service.exec, vec!["/usr/bin/false"].try_into().unwrap());
+        assert_eq!(
+            service.exec_stop,
+            Some(vec!["/usr/bin/true"].try_into().unwrap())
+        );
+    }
+}

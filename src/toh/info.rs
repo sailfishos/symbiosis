@@ -2,6 +2,7 @@
 
 //! TOH info.
 
+use super::config::{ConfigError, Configs};
 use super::value::*;
 use crate::errors::*;
 use log::warn;
@@ -271,5 +272,13 @@ impl Info {
         buff.set_position(0x04);
         buff.write_all(&checksum.to_be_bytes())?;
         Ok(buff.into_inner())
+    }
+
+    pub fn read_configs(&self) -> Result<Option<Configs>, ConfigError> {
+        Configs::find(self.vendor_id, self.product_id)
+    }
+
+    pub fn apply_overrides(&mut self, configs: &Configs) {
+        configs.apply_overrides(self);
     }
 }

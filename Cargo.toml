@@ -20,6 +20,7 @@ nix = "0.29.0"
 packed_struct = "0.10.1"
 procfs = { version = "0.18.0", default-features = false }
 serde = "1"
+strum = { version = "0.28.0", features = ["derive"] }
 systemd-journal-logger = "2.2.2"
 thiserror = "2"
 tokio = { version = "1.52.3", features = ["full"] }

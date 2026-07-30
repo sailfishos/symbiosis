@@ -95,6 +95,7 @@ cargo build -j1 $CARGO_OFFLINE --locked --release --all-targets
 %define rustbuilddir target/aarch64-unknown-linux-gnu/release
 %endif
 
+install -d -m0755 %{buildroot}%{_datadir}/tohd-1/tohs
 install -D -m0755 %{rustbuilddir}/%{name} %{buildroot}%{_bindir}/%{name}
 install -D -m0755 %{rustbuilddir}/create_toh_bin %{buildroot}%{_bindir}/create_toh_bin
 install -D -m0755 %{rustbuilddir}/toh_reader %{buildroot}%{_sbindir}/toh_reader
@@ -123,6 +124,7 @@ systemctl daemon-reload || :
 
 %files
 %{_bindir}/%{name}
+%{_datadir}/tohd-1/tohs
 %{systemunitdir}/%{name}.service
 %{dbussystemservicedir}/org.sailfishos.tohd1.service
 %{dbussystempolicydir}/%{name}.conf

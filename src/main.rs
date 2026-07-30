@@ -110,16 +110,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // Wait a bit after powering up so the chip has a chance to be ready
             sleep(Duration::from_millis(100)).await;
             match back_cover.detect().await {
-                Ok(Some(info)) => {
+                Ok(Some(mut info)) => {
                     let back_cover: Box<dyn WaitDisconnect> =
                         if info.leave_power_on.unwrap_or(false) {
                             back_cover.cast_to_wait_disconnect()
                         } else {
                             Box::new(back_cover.power_down_boxed()?)
                         };
+                    let configs = info.read_configs().unwrap_or_else(|error| {
+                        warn!("Failed to read config: {error}");
+                        None
+                    });
+                    if let Some(configs) = configs.as_ref() {
+                        info.apply_overrides(configs);
+                    }
+                    // Publish TOH on D-Bus before starting services
                     let toh = Toh::new(info);
                     object_server.at(TOH_PATH, toh).await?;
+                    if let Some(configs) = configs.as_ref() {
+                        configs.start_units().await;
+                    }
                     back_cover.wait_disconnect_boxed().await?;
+                    if let Some(configs) = configs.as_ref() {
+                        configs.stop_units().await;
+                    }
                     object_server.remove::<Toh, _>(TOH_PATH).await?;
                 }
                 Ok(None) => {

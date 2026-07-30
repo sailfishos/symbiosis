@@ -59,7 +59,7 @@ impl From<ciborium::de::Error<std::io::Error>> for CBORParsingError {
     }
 }
 
-/// Failed to convert some payload data.
+/// Failed to convert some payload or config data.
 #[derive(Debug, Clone, Error)]
 pub enum ExtraValueConversionError {
     /// Integer type is not yet supported.

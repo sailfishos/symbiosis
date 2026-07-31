@@ -7,7 +7,7 @@
 use crate::i2cdev::I2cDev;
 use crate::id::{AdcValue, Id, TohId};
 use crate::interrupt::{IntState, Interrupt};
-use crate::power::Power;
+use crate::power::{self, Power};
 use crate::toh::*;
 use async_trait::async_trait;
 use std::io::{self, ErrorKind, Read, Write};
@@ -53,7 +53,7 @@ pub struct BackCover<P: state::State + std::marker::Send> {
     id: Id,
     i2c: I2cDev,
     int: Interrupt,
-    pwr: Power,
+    pwr: Power<power::ReadWrite>,
     _state: PhantomData<P>,
 }
 

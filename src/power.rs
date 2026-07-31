@@ -3,24 +3,56 @@
 //! Power output pin handling.
 use crate::back_cover::paths::PWR_PATH;
 use std::fs::File;
-use std::io::{self, ErrorKind, Seek, Write};
+use std::io::{self, ErrorKind, Seek, Write as _};
+use std::marker::{PhantomData, Send};
 
-/// Power output pin state handling.
-pub struct Power {
-    file: File,
+mod access {
+    pub trait Access {}
+    pub trait Read {}
+    pub trait Write {}
 }
 
-impl Power {
+pub struct Read {}
+impl access::Access for Read {}
+impl access::Read for Read {}
+
+pub struct ReadWrite {}
+impl access::Access for ReadWrite {}
+impl access::Read for ReadWrite {}
+impl access::Write for ReadWrite {}
+
+/// Power output pin state handling.
+pub struct Power<A: access::Access + Send> {
+    file: File,
+    _access: PhantomData<A>,
+}
+
+impl Power<Read> {
+    /// Create new power output pin state reader.
+    ///
+    /// This uses the device file directly.
+    pub fn read_only() -> std::io::Result<Self> {
+        Ok(Self {
+            file: File::open(PWR_PATH)?,
+            _access: PhantomData,
+        })
+    }
+}
+
+impl Power<ReadWrite> {
     /// Create new power output pin state handler.
     ///
     /// This uses the device file directly.
     pub fn new() -> std::io::Result<Self> {
         // TODO: Could we lock the file so that other processes cannot change it?
         Ok(Self {
-            file: File::create(PWR_PATH)?,
+            file: File::options().read(true).write(true).open(PWR_PATH)?,
+            _access: PhantomData,
         })
     }
+}
 
+impl<A: access::Access + access::Write + Send> Power<A> {
     /// Set power output.
     pub fn set_power(&mut self, enabled: bool) -> std::io::Result<()> {
         self.file.rewind()?;
@@ -28,7 +60,9 @@ impl Power {
         self.file.flush()?;
         Ok(())
     }
+}
 
+impl<A: access::Access + access::Read + Send> Power<A> {
     /// Check if power output is enabled.
     pub fn is_powered(&mut self) -> std::io::Result<bool> {
         self.file.rewind()?;

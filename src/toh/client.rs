@@ -142,7 +142,7 @@ impl<'proxy> Toh<'proxy> {
 impl<'proxy> IsPowered for &Toh<'proxy> {
     type Error = std::io::Error;
     async fn is_powered(&mut self) -> Result<bool, Self::Error> {
-        Power::new()?.is_powered()
+        Power::read_only()?.is_powered()
     }
 }
 

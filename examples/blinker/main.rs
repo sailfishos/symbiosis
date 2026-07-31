@@ -9,7 +9,9 @@ mod controller;
 
 use crate::controller::LedController;
 use argh::FromArgs;
+use std::time::Duration;
 use symbiosis::toh::*;
+use tokio::time::sleep;
 use zbus::fdo::Error as DBusError;
 
 const INARI_BLUE_TOH_VENDOR_ID: u16 = 1;
@@ -43,6 +45,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Arguments = argh::from_env();
 
     let mut toh = Toh::new().await?;
+    let needs_power_on = !(&toh).is_powered().await?;
+    // TODO: Avoid errors when reacting to disconnect of a TOH
     match (&toh).detect().await {
         Ok(Some(info)) => {
             if info.vendor_id == INARI_BLUE_TOH_VENDOR_ID
@@ -56,6 +60,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .access_i2c_dev_with_power(leave_powered, move |dev| {
                         Box::pin(async move {
                             let mut ctrl = LedController::new(dev);
+                            if needs_power_on {
+                                sleep(Duration::from_millis(500)).await;
+                            }
                             match args.command {
                                 Command::Breathing(_) => {
                                     println!("Turning on breathing effect");

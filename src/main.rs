@@ -7,8 +7,8 @@
 //! Currently this is a very minimal implementation, mainly good for checking if a TOH is attached
 //! and reading the memory chip contents.
 
+use argh::FromArgs;
 use log::{debug, info, warn, LevelFilter};
-use std::env::args;
 use std::error::Error;
 use std::time::Duration;
 use symbiosis::{
@@ -36,6 +36,17 @@ impl<T: WaitDisconnect + Detect + PowerDown + 'static> BackCoverDetect for T {
     }
 }
 
+#[derive(FromArgs)]
+#[argh(
+    help_triggers("-h", "--help"),
+    description = "Daemon to provide TOH info and start related services."
+)]
+struct Arguments {
+    /// log at debug level.
+    #[argh(switch, short = 'd', long = "debug")]
+    log_debug: bool,
+}
+
 // TODO: Use capabilities, no need to have root access to everything
 
 /// Symbiosis TOH daemon entry point.
@@ -46,22 +57,12 @@ impl<T: WaitDisconnect + Detect + PowerDown + 'static> BackCoverDetect for T {
 async fn main() -> Result<(), Box<dyn Error>> {
     JournalLog::new()?.install()?;
 
-    let mut log_level = LevelFilter::Info;
-    for arg in args().skip(1) {
-        match arg.as_str() {
-            "--debug" => {
-                log_level = LevelFilter::Debug;
-            }
-            "--trace" => {
-                log_level = LevelFilter::Trace;
-            }
-            arg => {
-                Err(format!("Bad argument: {arg}"))?;
-            }
-        }
-    }
-
-    log::set_max_level(log_level);
+    let args: Arguments = argh::from_env();
+    log::set_max_level(if args.log_debug {
+        LevelFilter::Debug
+    } else {
+        LevelFilter::Info
+    });
 
     let connection = Connection::system().await?;
     let object_server = connection.object_server();

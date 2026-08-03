@@ -141,23 +141,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         } else {
                             Box::new(back_cover.power_down_boxed()?)
                         };
-                    let configs = info.read_configs().unwrap_or_else(|error| {
-                        warn!("Failed to read config: {error}");
-                        None
-                    });
-                    if let Some(configs) = configs.as_ref() {
-                        info.apply_overrides(configs);
-                    }
+                    let units = match info.read_configs() {
+                        Err(error) => {
+                            warn!("Failed to read config: {error}");
+                            None
+                        }
+                        Ok(Some(configs)) => {
+                            let (overrides, units) = configs.split();
+                            info.apply_overrides(overrides);
+                            Some(units)
+                        }
+                        Ok(None) => None,
+                    };
                     // Publish TOH on D-Bus before starting services
                     let toh = Toh::new(info);
                     object_server.at(TOH_PATH, toh).await?;
-                    if let Some(configs) = configs.as_ref() {
+                    let units = if let Some(units) = units {
                         // toh_already_present <=> service is starting + TOH is connected
-                        configs.start_units(toh_already_present).await;
-                    }
+                        Some(units.start_units(toh_already_present).await)
+                    } else {
+                        None
+                    };
                     back_cover.wait_disconnect_boxed().await?;
-                    if let Some(configs) = configs.as_ref() {
-                        configs.stop_units().await;
+                    if let Some(units) = units {
+                        units.stop_units().await;
                     }
                     object_server.remove::<Toh, _>(TOH_PATH).await?;
                 }

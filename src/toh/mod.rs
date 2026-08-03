@@ -9,7 +9,7 @@ pub mod traits;
 mod value;
 
 pub use client::{FetchingInfoError, Toh};
-pub use config::{ConfigError, Configs};
+pub use config::{ConfigError, Configs, Overrides, Units};
 pub use info::*;
 pub use traits::*;
 pub use value::ExtraValue;

@@ -2,7 +2,7 @@
 
 //! TOH info.
 
-use super::config::{ConfigError, Configs};
+use super::config::{ConfigError, Configs, Overrides};
 use super::value::*;
 use crate::errors::*;
 use log::warn;
@@ -274,11 +274,16 @@ impl Info {
         Ok(buff.into_inner())
     }
 
+    /// Read configs for this TOH.
     pub fn read_configs(&self) -> Result<Option<Configs>, ConfigError> {
         Configs::find(self.vendor_id, self.product_id)
     }
 
-    pub fn apply_overrides(&mut self, configs: &Configs) {
-        configs.apply_overrides(self);
+    /// Apply overrides from configs to this Info instance.
+    ///
+    /// Consumes the Overrides instance, clone it if you need to apply it multiple times for some
+    /// reason.
+    pub fn apply_overrides(&mut self, overrides: Overrides) {
+        overrides.apply_overrides(self);
     }
 }

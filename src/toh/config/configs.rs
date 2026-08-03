@@ -9,6 +9,7 @@ use super::parse::{self, combine};
 use crate::systemd::Manager;
 use crate::toh::Info;
 use std::fs::read_dir;
+use std::marker::{PhantomData, Send};
 use std::path::PathBuf;
 use thiserror::Error;
 use yaml_serde::Error as YamlError;
@@ -37,6 +38,38 @@ pub struct Configs {
     overrides: parse::Override,
     system_units: Vec<parse::SystemdUnit>,
     user_units: Vec<parse::SystemdUnit>,
+}
+
+/// Overrides from Configs.
+///
+/// These are applied to Info instances.
+#[derive(Debug, Clone, Default)]
+pub struct Overrides {
+    overrides: parse::Override,
+}
+
+mod state {
+    /// Assumed unit state.
+    pub trait State {}
+
+    /// Services have been stopped.
+    pub struct Stopped;
+
+    /// Services have been started.
+    pub struct Started;
+
+    impl State for Stopped {}
+    impl State for Started {}
+}
+
+/// Systemd units from Configs.
+///
+/// System and user units to start for TOH.
+#[derive(Debug, Default)]
+pub struct Units<S: state::State + Send> {
+    system_units: Vec<parse::SystemdUnit>,
+    user_units: Vec<parse::SystemdUnit>,
+    _state: PhantomData<S>,
 }
 
 impl Configs {
@@ -110,25 +143,49 @@ impl Configs {
         }
     }
 
-    pub(crate) fn apply_overrides(&self, info: &mut Info) {
-        // TODO: Avoid clone, for example by splitting Configs to suitable parts
-        let overrides = self.overrides.clone();
-        // If we had even more of these, it would probably make sense to write a derive macro.
-        combine!(info, overrides, vendor_name);
-        combine!(info, overrides, product_name);
-        combine!(info, overrides, vendor_website);
-        combine!(info, overrides, product_website);
-        combine!(info, overrides, leave_power_on);
-        combine!(info, overrides, power_input_toh);
-        info.extra.extend(overrides.extra);
+    /// Splits the config into overrides and unit configurations.
+    pub fn split(self) -> (Overrides, Units<state::Stopped>) {
+        let Self {
+            overrides,
+            system_units,
+            user_units,
+        } = self;
+        (
+            Overrides { overrides },
+            Units {
+                system_units,
+                user_units,
+                _state: PhantomData,
+            },
+        )
     }
+}
 
-    pub async fn start_units(&self, on_service_start: bool) {
-        if !self.system_units.is_empty() {
+impl Overrides {
+    pub(crate) fn apply_overrides(self, info: &mut Info) {
+        // If we had even more of these, it would probably make sense to write a derive macro.
+        combine!(info, self.overrides, vendor_name);
+        combine!(info, self.overrides, product_name);
+        combine!(info, self.overrides, vendor_website);
+        combine!(info, self.overrides, product_website);
+        combine!(info, self.overrides, leave_power_on);
+        combine!(info, self.overrides, power_input_toh);
+        info.extra.extend(self.overrides.extra);
+    }
+}
+
+impl Units<state::Stopped> {
+    /// Starts units found in configuration.
+    pub async fn start_units(self, on_service_start: bool) -> Units<state::Started> {
+        let Self {
+            system_units,
+            user_units,
+            ..
+        } = self;
+        if !system_units.is_empty() {
             match Manager::system().await {
                 Ok(mut manager) => {
-                    for unit in self
-                        .system_units
+                    for unit in system_units
                         .iter()
                         .filter(|unit| !on_service_start || unit.run_on_start)
                     {
@@ -143,11 +200,10 @@ impl Configs {
                 }
             }
         }
-        if !self.user_units.is_empty() {
+        if !user_units.is_empty() {
             match Manager::session().await {
                 Ok(mut manager) => {
-                    for unit in self
-                        .user_units
+                    for unit in user_units
                         .iter()
                         .filter(|unit| !on_service_start || unit.run_on_start)
                     {
@@ -162,13 +218,26 @@ impl Configs {
                 }
             }
         }
+        Units {
+            system_units,
+            user_units,
+            _state: PhantomData,
+        }
     }
+}
 
-    pub async fn stop_units(&self) {
-        if !self.system_units.is_empty() {
+impl Units<state::Started> {
+    /// Stops started units.
+    pub async fn stop_units(self) -> Units<state::Stopped> {
+        let Self {
+            system_units,
+            user_units,
+            ..
+        } = self;
+        if !system_units.is_empty() {
             match Manager::system().await {
                 Ok(mut manager) => {
-                    for unit in &self.system_units {
+                    for unit in &system_units {
                         log::debug!("Stopping {} in system session", unit.name);
                         if let Err(error) = manager.stop_unit(unit).await {
                             log::warn!("Failed to stop unit {}: {error}", unit.name);
@@ -180,10 +249,10 @@ impl Configs {
                 }
             }
         }
-        if !self.user_units.is_empty() {
+        if !user_units.is_empty() {
             match Manager::session().await {
                 Ok(mut manager) => {
-                    for unit in &self.user_units {
+                    for unit in &user_units {
                         log::debug!("Stopping {} in user session", unit.name);
                         if let Err(error) = manager.stop_unit(unit).await {
                             log::warn!("Failed to stop unit {}: {error}", unit.name);
@@ -194,6 +263,11 @@ impl Configs {
                     log::error!("Failed to access user manager: {error}");
                 }
             }
+        }
+        Units {
+            system_units,
+            user_units,
+            _state: PhantomData,
         }
     }
 }

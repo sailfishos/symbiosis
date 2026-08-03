@@ -67,7 +67,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let connection = Connection::system().await?;
     let object_server = connection.object_server();
     object_server.at(SERVICE_PATH, ObjectManager).await?;
-    connection.request_name(SERVICE_NAME).await?;
+    connection
+        .request_name(SERVICE_NAME)
+        .await
+        .map_err(|error| {
+            // Rust 1.76.0 would let us use inspect_err instead.
+            if matches!(error, zbus::Error::NameTaken) {
+                log::error!("Bus name is already taken. Is symbiosis already running?");
+            } else {
+                log::error!("Error registering name: {error}");
+            }
+            error
+        })?;
     debug!("Connected to D-Bus");
     let mut unsupported_message_logged = false;
 

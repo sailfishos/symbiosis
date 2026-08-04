@@ -70,6 +70,7 @@ pub struct Info {
     pub leave_power_on: Option<bool>,
     pub power_input_toh: Option<bool>,
     // Insert any known keys from data before this
+    #[serde(flatten)]
     pub extra: BTreeMap<String, ExtraValue>,
 }
 

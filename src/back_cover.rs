@@ -10,7 +10,7 @@ use crate::interrupt::{IntState, Interrupt};
 use crate::power::{self, Power};
 use crate::toh::*;
 use async_trait::async_trait;
-use std::io::{self, ErrorKind, Read, Write};
+use std::io::{self, Read, Write};
 use std::marker::PhantomData;
 use std::time::Duration;
 use thiserror::Error;
@@ -265,22 +265,21 @@ impl BackCover<state::Present256BBlocks> {
         let mut result = Vec::new();
         let mut buf = [0; 256];
         for address in 0x50..0x60 {
-            match self.i2c.set_target_address(address) {
+            // Set target address, this won't actually do anything on the bus.
+            self.i2c.set_target_address(address)?;
+            // Set data address to zero which can fail if there is no such chip.
+            match self.i2c.write_all(&[0]) {
                 Ok(_) => {
-                    // Set data address to zero
-                    self.i2c.write_all(&[0])?;
-
                     self.i2c.read_exact(&mut buf)?;
                     result.extend(buf);
                 }
+                Err(error) if error.raw_os_error() == Some(libc::ENXIO) && address != 0x50 => {
+                    // No more blocks, all read.
+                    return Ok(result);
+                }
                 Err(error) => {
-                    return if let ErrorKind::NotFound = error.kind() {
-                        // No more blocks, all read.
-                        Ok(result)
-                    } else {
-                        // Something else went wrong.
-                        Err(error)
-                    };
+                    // Something else went wrong.
+                    return Err(error);
                 }
             }
         }

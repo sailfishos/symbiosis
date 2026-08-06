@@ -28,3 +28,12 @@ The important known missing parts are:
 
 Additionally there are many TODOs to implement all around the code base.
 If you want to get your hands dirty, those are a good place to start.
+
+Versioning
+----------
+When tagging this repository, please update the version number in _Cargo.toml_ and in _rpm/symbiosis.spec_.
+The version number following [semantic versioning](https://semver.org/) on best effort basis.
+
+As we are still in zeroth versions until this is considered feature complete enough,
+bump the minor number if there is a breaking change to the public interface,
+and just the patch number if the change is something else.

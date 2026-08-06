@@ -242,6 +242,7 @@ impl<P: state::State + std::marker::Send> WaitDisconnect for BackCover<P> {
 #[async_trait]
 impl<P: state::State + std::marker::Send> IsPowered for BackCover<P> {
     type Error = io::Error;
+
     async fn is_powered(&mut self) -> Result<bool, Self::Error> {
         self.pwr.is_powered()
     }
@@ -250,6 +251,7 @@ impl<P: state::State + std::marker::Send> IsPowered for BackCover<P> {
 #[async_trait]
 impl<P: state::State + std::marker::Send> IsPresent for BackCover<P> {
     type Error = io::Error;
+
     async fn is_present(&mut self) -> Result<bool, Self::Error> {
         if self.read_int_state()? == IntState::Low {
             Ok(self.read_adc().await?.is_toh_present())
@@ -301,6 +303,7 @@ pub enum DetectionError {
 #[async_trait]
 impl Detect for BackCover<state::Present256BBlocks> {
     type Error = DetectionError;
+
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
         // Check ID pin and INT pin one more time to see that TOH is still there
         if self.id.read()?.is_toh_present() && self.read_int_state()? == IntState::Low {

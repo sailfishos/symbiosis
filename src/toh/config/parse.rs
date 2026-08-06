@@ -185,24 +185,45 @@ impl<'de> Deserialize<'de> for Exec {
     }
 }
 
-/// Missing executable path.
+/// Bad executable path provided.
+///
+/// Returned when the first value does not have the right format.
 #[derive(Debug, Error)]
-#[error("Missing executable path")]
-pub(crate) struct MissingExecutablePath;
+pub(crate) enum BadExecutable {
+    /// Missing executable path.
+    ///
+    /// There must be at least an absolute path to the executable.
+    #[error("Missing executable path")]
+    Missing,
+    /// Missing executable file name.
+    ///
+    /// Path did not contain file name.
+    #[error("Missing executable name")]
+    NoFileName,
+    /// Executable path must be an absolute path.
+    #[error("Executable path is not absolute")]
+    NotAbsolutePath,
+}
 
 impl TryFrom<Vec<&str>> for Exec {
-    type Error = MissingExecutablePath;
+    type Error = BadExecutable;
 
     fn try_from(vec: Vec<&str>) -> Result<Self, Self::Error> {
-        // TODO: Must check that this is absolute!
         let mut it = vec.into_iter();
         if let Some(bin) = it.next() {
-            Ok(Self {
-                bin: bin.into(),
-                args: Vec::from_iter(it.map(ToOwned::to_owned)),
-            })
+            let path: PathBuf = bin.into();
+            if !path.is_absolute() {
+                Err(BadExecutable::NotAbsolutePath)
+            } else if path.file_name().is_none() {
+                Err(BadExecutable::NoFileName)
+            } else {
+                Ok(Self {
+                    bin: path,
+                    args: Vec::from_iter(it.map(ToOwned::to_owned)),
+                })
+            }
         } else {
-            Err(MissingExecutablePath)
+            Err(BadExecutable::Missing)
         }
     }
 }

@@ -302,18 +302,28 @@ pub enum DetectionError {
 impl Detect for BackCover<state::Present256BBlocks> {
     type Error = DetectionError;
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
-        let content = self.read_chip()?;
-        Ok(Some(Info::parse_from_bytes(&content)?))
+        // Check ID pin and INT pin one more time to see that TOH is still there
+        if self.id.read()?.is_toh_present() && self.read_int_state()? == IntState::Low {
+            let content = self.read_chip()?;
+            Ok(Some(Info::parse_from_bytes(&content)?))
+        } else {
+            Ok(None)
+        }
     }
 }
 
 #[async_trait]
 impl Detect for BackCover<state::Present64kBBlocks> {
     type Error = DetectionError;
+
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
         // TODO: We need to consider how we make the ID value detection so robust that we don't
         // accidentally rewrite the first byte on those 8-bit memory chips,
         // or alternatively we need to do this in a way that does not result in overwrites.
-        Ok(None) // TODO: Implement reading for Present64kBBlocks too
+        // TODO: Implement reading for Present64kBBlocks too
+        Err(DetectionError::Io(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Not implemented yet",
+        )))
     }
 }

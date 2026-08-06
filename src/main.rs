@@ -165,8 +165,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     object_server.remove::<Toh, _>(TOH_PATH).await?;
                 }
                 Ok(None) => {
-                    // TODO: Use more accurate warning here
-                    warn!("Memory chip content could not be fetched");
+                    // TOH was removed. Let's loop back.
+                    info!("TOH was disconnected while detecting it");
                 }
                 Err(error) => {
                     // Reasons why this might happen include that TOH was not yet properly

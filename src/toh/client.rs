@@ -36,6 +36,9 @@ pub enum AccessError<T> {
     /// Error while borrowing the device.
     #[error("Borrowing failed: {0}")]
     Borrow(#[from] BorrowError),
+    /// IO error with the device.
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
     /// Error while returning the device.
     #[error("Returning failed: {1}")]
     Return(T, ReturnError),
@@ -76,7 +79,7 @@ impl<'proxy> Toh<'proxy> {
         F: for<'dev> FnOnce(&'dev mut I2cDev) -> BoxFuture<'dev, T>,
     {
         let fd = self.toh.borrow_i2c_dev_access().await?;
-        let mut dev = I2cDev::from_fd(fd.into());
+        let mut dev = I2cDev::from_fd(fd.into())?;
         let result = f(&mut dev).await;
         if let Err(error) = self.toh.return_i2c_dev_access().await {
             Err(AccessError::from((error, result)))
@@ -98,7 +101,7 @@ impl<'proxy> Toh<'proxy> {
             .toh
             .borrow_i2c_dev_access_with_power(leave_power_on)
             .await?;
-        let mut dev = I2cDev::from_fd(fd.into());
+        let mut dev = I2cDev::from_fd(fd.into())?;
         let result = f(&mut dev).await;
         if let Err(error) = self.toh.return_i2c_dev_access().await {
             Err(AccessError::from((error, result)))

@@ -21,7 +21,7 @@ pub struct I2cDev {
 impl I2cDev {
     /// Create new instance for path.
     ///
-    /// The path should be a device file like "/dev/i2c-0".
+    /// The path should be a device file like `"/dev/i2c-0"`.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         // TODO: This should check that the file is for the correct type of device.
         Ok(Self {

@@ -1,11 +1,7 @@
 // Copyright (c) 2026 Jolla Mobile Ltd
 
-//! TOH daemon.
-//!
-//! The working name is 'symbiosis'.
-//!
-//! Currently this is a very minimal implementation, mainly good for checking if a TOH is attached
-//! and reading the memory chip contents.
+//! TOH daemon for detecting presence, fetching and publishing info, and starting and stopping
+//! services.
 
 use argh::FromArgs;
 use log::{debug, info, warn, LevelFilter};

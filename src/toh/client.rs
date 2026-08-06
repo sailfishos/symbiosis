@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Jolla Mobile Ltd
 
-//! Access to TOH through org.sailfishos.tohd1.
+//! Access to TOH through `org.sailfishos.tohd1`.
 
 use super::*;
 use crate::{

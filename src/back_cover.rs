@@ -70,7 +70,7 @@ pub enum Variant {
 impl BackCover<state::Detached> {
     /// Create new instance from device files.
     ///
-    /// Requires root access and thus is mainly only good for the daemon.
+    /// Requires _root_ access and thus is mainly only good for the daemon.
     pub fn new() -> io::Result<Self> {
         // TODO: Handle also the buffer chip power
         let mut pwr = Power::new()?;
@@ -103,10 +103,10 @@ impl BackCover<state::Detached> {
 }
 
 impl BackCover<state::Attached> {
-    /// Power up the connector and return BackCover in new state where the chip can be read.
+    /// Power up the connector and return [`BackCover`] in a new state in which the chip can be
+    /// read.
     ///
-    /// Returns an error if TOH is not present.
-    /// Returns Ok(None) if TOH is not of a supported type.
+    /// Returns an error if TOH is not present or cannot be identified.
     pub async fn power_up(mut self) -> io::Result<Variant> {
         self.pwr.set_power(true)?;
         // TODO: We should probably wait a bit here.
@@ -169,7 +169,7 @@ impl<P: state::State + std::marker::Send> BackCover<P> {
     }
 }
 
-/// Trait for power_down.
+/// Trait for [`power_down`](Self::power_down) method.
 pub trait PowerDown {
     /// Power down TOH.
     fn power_down(self) -> io::Result<BackCover<state::Detached>>;
@@ -203,7 +203,7 @@ impl<P: state::State + std::marker::Send> PowerDown for BackCover<P> {
     }
 }
 
-/// Trait for wait_disconnect method.
+/// Trait for [`wait_disconnect`](Self::wait_disconnect) method.
 #[async_trait]
 pub trait WaitDisconnect {
     /// Wait for disconnection of TOH.
@@ -214,7 +214,7 @@ pub trait WaitDisconnect {
     // NB: Just to workaround some inconveniences in Rust.
     /// Wait for disconnection of TOH for boxed instance.
     ///
-    /// See also wait_disconnect.
+    /// See also [`wait_disconnect`](Self::wait_disconnect).
     async fn wait_disconnect_boxed(mut self: Box<Self>) -> io::Result<BackCover<state::Detached>>;
 }
 

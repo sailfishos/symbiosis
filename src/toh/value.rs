@@ -150,15 +150,15 @@ impl<'a> TryFrom<&zvariant::Value<'a>> for ExtraValue {
     }
 }
 
-/// Error for non-representable values from ExtraValue into zvariant::OwnedValue.
+/// Error for non-representable values from [`ExtraValue`] into [`struct@zvariant::OwnedValue`].
 ///
-/// Can be converted into &ExtraValue.
+/// Can be converted into [`&ExtraValue`](ExtraValue).
 #[derive(Debug, Clone)]
 pub struct NonConvertableValue<'v>(&'v ExtraValue);
 
 impl ExtraValue {
     // TODO: It would be nice if library users didn't have to depend on zvariant unnecessarily.
-    /// Converts to zvariant::Value but discards inner values that could not be converted.
+    /// Converts to [`enum@zvariant::Value`] but discards inner values that could not be converted.
     pub fn try_into_dbus_lossy(&self) -> Result<zvariant::Value<'_>, NonConvertableValue<'_>> {
         use zvariant::Value;
         use ExtraValue::*;
@@ -187,6 +187,7 @@ impl ExtraValue {
         }
     }
 
+    /// Converts to [`ciborium::Value`].
     pub fn into_cbor(self) -> ciborium::Value {
         use ciborium::Value;
         use ExtraValue::*;

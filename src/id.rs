@@ -14,13 +14,13 @@ pub enum TohId {
     R15k,
     /// Unknown value resistor.
     Unknown,
-    /// Resistor not present or value too low to detect.
+    /// Resistor not present or value too high to detect.
     NotPresent,
 }
 
 /// Value read from ID pin ADC.
 ///
-/// Convertible to u16 for the inner value.
+/// Convertible to `u16` for the inner value.
 #[derive(Copy, Clone, Debug, Ord, PartialOrd, PartialEq, Eq)]
 pub struct AdcValue(u16);
 

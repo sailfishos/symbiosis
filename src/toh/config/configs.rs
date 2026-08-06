@@ -40,9 +40,9 @@ pub struct Configs {
     user_units: Vec<parse::SystemdUnit>,
 }
 
-/// Overrides from Configs.
+/// Overrides from [`Configs`].
 ///
-/// These are applied to Info instances.
+/// These are applied to [`Info`] instances.
 #[derive(Debug, Clone, Default)]
 pub struct Overrides {
     overrides: parse::Override,
@@ -62,7 +62,7 @@ mod state {
     impl State for Started {}
 }
 
-/// Systemd units from Configs.
+/// Systemd units from [`Configs`].
 ///
 /// System and user units to start for TOH.
 #[derive(Debug, Default)]

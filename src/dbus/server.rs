@@ -209,9 +209,9 @@ impl Toh {
 
     /// Borrow i2c-dev access to the I²C bus.
     ///
-    /// Set leave_power_on to true if you want the power to stay on after returning the access.
+    /// Set `leave_power_on` to `true` if you want the power to stay on after returning the access.
     ///
-    /// See also borrow_i2c_dev_access.
+    /// See also [`borrow_i2c_dev_access`](Self::borrow_i2c_dev_access).
     async fn borrow_i2c_dev_access_with_power(
         &mut self,
         leave_power_on: bool,

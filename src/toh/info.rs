@@ -187,7 +187,7 @@ impl Info {
 
     /// Returns payload content.
     ///
-    /// Set include_extra to false to skip all extra keys.
+    /// Set `include_extra` to `false` to skip all extra keys.
     fn get_payload(&self, include_extra: bool) -> BTreeMap<String, ciborium::Value> {
         use ciborium::Value;
         let mut payload = BTreeMap::<String, Value>::new();
@@ -280,10 +280,10 @@ impl Info {
         Configs::find(self.vendor_id, self.product_id)
     }
 
-    /// Apply overrides from configs to this Info instance.
+    /// Apply overrides from configs to this `Info` instance.
     ///
-    /// Consumes the Overrides instance, clone it if you need to apply it multiple times for some
-    /// reason.
+    /// Consumes the [`Overrides`] instance, clone it if you need to apply it multiple times for
+    /// some reason.
     pub fn apply_overrides(&mut self, overrides: Overrides) {
         overrides.apply_overrides(self);
     }

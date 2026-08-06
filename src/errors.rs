@@ -4,18 +4,21 @@
 
 use thiserror::Error;
 
-/// Wrong magic errors.
+/// Wrong magic value encountered.
 #[derive(Debug, Clone, Error)]
 #[error("Unexpected magic value: {value:?}")]
 pub struct WrongMagicError {
+    /// Encountered value in the data.
     pub value: [u8; 4],
 }
 
-/// Checksum errors.
+/// Calculated checksum did not match the expected value.
 #[derive(Debug, Clone, Error)]
 #[error("Checksum did not match: {calculated} != {expected}")]
 pub struct ChecksumError {
+    /// Calculated value.
     pub calculated: u32,
+    /// Expected value in the data.
     pub expected: u32,
 }
 
@@ -23,14 +26,16 @@ pub struct ChecksumError {
 #[derive(Debug, Clone, Error)]
 #[error("Missing data: got {length} bytes, expected {expected} bytes")]
 pub struct MissingDataError {
+    /// Length of the data received.
     pub length: usize,
+    /// Expected length of the data.
     pub expected: usize,
 }
 
 // NB: This mainly exists because ciborium::de::Error is not Clone.
 /// CBOR payload parsing failed.
 ///
-/// Mirrors ciborium::de::Error.
+/// Mirrors [`ciborium::de::Error`].
 #[derive(Debug, Clone, Error)]
 pub enum CBORParsingError {
     /// IO failure.

@@ -12,4 +12,4 @@ pub use client::{FetchingInfoError, Toh};
 pub use config::{ConfigError, Configs, Overrides, Units};
 pub use info::*;
 pub use traits::*;
-pub use value::ExtraValue;
+pub use value::{ExtraValue, NonConvertableValue};

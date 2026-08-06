@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use zbus::{fdo, proxy};
 use zvariant::{Optional, OwnedFd, OwnedValue};
 
-/// Proxy trait for org.sailfishos.tohd1.Toh interface.
+/// Proxy trait for `org.sailfishos.tohd1.Toh` interface.
 ///
-/// This the client side counterpart for crate::dbus::server::Toh.
+/// This the client side counterpart for [`crate::dbus::server::Toh`].
 #[proxy(
     interface = "org.sailfishos.tohd1.Toh",
     default_service = "org.sailfishos.tohd1",
@@ -60,7 +60,7 @@ pub trait Toh {
     ///
     /// Set leave_power_on to true if you want the power to stay on after returning the access.
     ///
-    /// See also borrow_i2c_dev_access.
+    /// See also [`borrow_i2c_dev_access`](Self::borrow_i2c_dev_access).
     async fn borrow_i2c_dev_access_with_power(
         &mut self,
         leave_power_on: bool,

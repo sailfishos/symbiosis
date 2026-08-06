@@ -4,12 +4,14 @@
 
 use zbus::DBusError;
 
+/// Error while borrowing access to i2c-dev.
 #[derive(DBusError, Debug)]
 #[zbus(prefix = "org.sailfishos.tohd1")]
 pub enum BorrowError {
-    /// The process trying to borrow is not run as root.
+    /// The process trying to borrow is not run as _root_ or _privileged_.
     ///
-    /// This restriction may get lifted in the future if suitable access control mechanism is found.
+    /// This restriction may get lifted in the future if a more suitable access control mechanism is
+    /// implemented.
     AccessDenied,
     /// The device was already borrowed.
     AlreadyBorrowed,
@@ -44,6 +46,7 @@ impl From<procfs::ProcError> for BorrowError {
     }
 }
 
+/// Error while returning access to i2c-dev.
 #[derive(DBusError, Debug)]
 #[zbus(prefix = "org.sailfishos.tohd1")]
 pub enum ReturnError {

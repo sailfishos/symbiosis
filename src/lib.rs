@@ -1,6 +1,12 @@
 // Copyright (c) 2026 Jolla Mobile Ltd
 
-//! Parts of TOH daemon.
+//! This library crate contains parts of TOH daemon.
+//!
+//! The daemon implements detecting presence, fetching and publishing info, and starting and stopping
+//! services. All of this is done in TOH agnostic way.
+//!
+//! If you are implementing services for TOH, you'll likely want to use the D-Bus interface and not
+//! include this code.
 
 pub mod back_cover;
 pub mod dbus;

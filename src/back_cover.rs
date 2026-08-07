@@ -293,7 +293,19 @@ pub trait WaitDisconnect {
 #[async_trait]
 impl<P: state::State + std::marker::Send> WaitDisconnect for BackCover<P> {
     async fn wait_disconnect(mut self) -> io::Result<BackCover<state::Detached>> {
-        self.int.watch(IntState::High).await?;
+        loop {
+            self.int.watch(IntState::High).await?;
+            // Check that the cover was actually removed by reading ADC one more time.
+            // If ID pin happens to get disconnected only after this check, we will anyway loop back
+            // over, read INT pin one more time and check ID pin again.
+            if !self.id.read()?.is_toh_present() {
+                // TOH is disconnected
+                break;
+            } else {
+                // TODO: Reporting interrupts
+                sleep(Duration::from_millis(100)).await;
+            }
+        }
         let BackCover {
             id, i2c, int, pwr, ..
         } = self;

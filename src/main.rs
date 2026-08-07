@@ -8,17 +8,22 @@ use log::{debug, info, warn, LevelFilter};
 use std::error::Error;
 use std::time::Duration;
 use symbiosis::{
-    back_cover::{BackCover, DetectionError, PowerDown, Variant, WaitDisconnect},
+    back_cover::{
+        BackCover, DetectionError, IdentificationError, PowerDown, Variant, WaitDisconnect,
+    },
     dbus::server::Toh,
     toh::{Detect, IsPresent},
 };
 use systemd_journal_logger::JournalLog;
-use tokio::{select, time::sleep};
+use tokio::time::{sleep, timeout};
 use zbus::{fdo::ObjectManager, Connection};
 
 const SERVICE_NAME: &str = "org.sailfishos.tohd1";
 const SERVICE_PATH: &str = "/org/sailfishos/tohd1";
 const TOH_PATH: &str = "/org/sailfishos/tohd1/toh";
+
+// TODO: Remove this when we have proper interrupt handling
+const DISCONNECT_WAIT: Duration = Duration::from_secs(10);
 
 trait BackCoverDetect: WaitDisconnect + Detect + PowerDown {
     // Rust 1.86.0 gets rid of this
@@ -112,17 +117,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                     // Since this is fairly unlikely, we retry detection after some time even if the
                     // TOH has not been disconnected.
-                    select! {
-                        result = back_cover.wait_disconnect() => {
-                            result?;
-                        }
-                        _ = sleep(Duration::from_secs(10)) => {}
-                    };
+                    timeout(DISCONNECT_WAIT, back_cover.wait_disconnect())
+                        .await
+                        .ok()
+                        .transpose()?;
                     None
                 }
                 Err(error) => {
                     warn!("TOH power up failed: {error}");
-                    sleep(Duration::from_secs(10)).await;
+                    let delay = if matches!(
+                        error,
+                        IdentificationError::BadlySeated
+                            | IdentificationError::IdResistorNotDetected
+                    ) {
+                        // Use a shorter delay if user is still connecting TOH
+                        Duration::from_secs(1)
+                    } else {
+                        // Otherwise let's sleep for a good while
+                        DISCONNECT_WAIT
+                    };
+                    sleep(delay).await;
                     None
                 }
             };

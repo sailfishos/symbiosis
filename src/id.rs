@@ -3,8 +3,10 @@
 //! ID pin handling, ADC and all that stuff.
 
 use crate::back_cover::paths::ADC_PATH;
+use derive_more::Into;
 use std::fs::File;
 use std::io::{self, ErrorKind, Seek};
+use std::ops::Sub;
 
 /// Identified TOH types according to read ADC value.
 pub enum TohId {
@@ -21,7 +23,7 @@ pub enum TohId {
 /// Value read from ID pin ADC.
 ///
 /// Convertible to `u16` for the inner value.
-#[derive(Copy, Clone, Debug, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, Ord, PartialOrd, PartialEq, Eq, Into)]
 pub struct AdcValue(u16);
 
 impl AdcValue {
@@ -44,9 +46,17 @@ impl AdcValue {
     }
 }
 
-impl From<AdcValue> for u16 {
+impl From<AdcValue> for f64 {
     fn from(value: AdcValue) -> Self {
-        value.0
+        value.0.into()
+    }
+}
+
+impl Sub for AdcValue {
+    type Output = i32;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        i32::from(self.0) - i32::from(rhs.0)
     }
 }
 

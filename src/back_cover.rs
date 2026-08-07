@@ -14,7 +14,10 @@ use std::io::{self, Read, Write};
 use std::marker::PhantomData;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::time::sleep;
+use tokio::time::{interval, sleep, MissedTickBehavior};
+
+// Difference that is considered acceptable for attached TOH ID pin ADC values.
+const ACCEPTED_ADC_DIFFERENCE: f64 = 0.005; // 0.5 %
 
 pub(crate) mod paths {
     pub(crate) const I2C_PATH: &str = "/dev/i2c-0";
@@ -102,15 +105,57 @@ impl BackCover<state::Detached> {
     }
 }
 
+/// Error when identifying back cover.
+#[derive(Debug, Error)]
+pub enum IdentificationError {
+    /// IO error while identifying cover.
+    ///
+    /// This can happen when INT pin state is read again, or when power is enabled or disabled.
+    #[error("IO error: {0}")]
+    Io(#[from] io::Error),
+    /// IO error while reading ADC.
+    #[error("IO error while reading ADC: {0}")]
+    AdcIo(io::Error),
+    /// Cover got removed before identification.
+    #[error("Cover disconnected")]
+    Disconnected,
+    /// Badly seated back cover detected.
+    ///
+    /// In that case it is probably best to try again until cover is properly in place or removed.
+    #[error("Cover is badly seated")]
+    BadlySeated,
+    /// ID resistor is not detected.
+    ///
+    /// In other words INT was low but ADC read as disconnected. This may be an intermittent error.
+    #[error("ID resistor was not detected")]
+    IdResistorNotDetected,
+}
+
+impl From<AdcReadError> for IdentificationError {
+    fn from(error: AdcReadError) -> Self {
+        use IdentificationError::*;
+        match error {
+            AdcReadError::Io(error) => AdcIo(error),
+            AdcReadError::Inconsistent => BadlySeated,
+        }
+    }
+}
+
 impl BackCover<state::Attached> {
     /// Power up the connector and return [`BackCover`] in a new state in which the chip can be
     /// read.
     ///
     /// Returns an error if TOH is not present or cannot be identified.
-    pub async fn power_up(mut self) -> io::Result<Variant> {
+    pub async fn power_up(mut self) -> Result<Variant, IdentificationError> {
+        // TODO: Could we have some guard type for power?
         self.pwr.set_power(true)?;
-        // TODO: We should probably wait a bit here.
         let adc = self.read_adc().await?;
+        if self.read_int_state()? != IntState::Low {
+            // INT got disconnected => TOH is no longer present.
+            self.pwr.set_power(false)?;
+            return Err(IdentificationError::Disconnected);
+        }
+
         let BackCover {
             id,
             i2c,
@@ -134,8 +179,13 @@ impl BackCover<state::Attached> {
                 pwr,
                 _state: PhantomData::<state::Present64kBBlocks>,
             })),
-            _ => {
-                // TODO: Distinguish between attached TOH and detached TOH.
+            TohId::NotPresent => {
+                // INT pin claims that there is a cover but no resistor was found.
+                pwr.set_power(false)?;
+                Err(IdentificationError::IdResistorNotDetected)
+            }
+            TohId::Unknown => {
+                // Unsupported type.
                 pwr.set_power(false)?;
                 Ok(Variant::Attached(BackCover {
                     id,
@@ -149,6 +199,17 @@ impl BackCover<state::Attached> {
     }
 }
 
+/// Error during reading ADC multiple times.
+#[derive(Debug, Error)]
+pub enum AdcReadError {
+    /// IO error while reading ADC.
+    #[error("IO error: {0}")]
+    Io(#[from] io::Error),
+    /// Inconsistent results.
+    #[error("Inconsistent readings")]
+    Inconsistent,
+}
+
 impl<P: state::State + std::marker::Send> BackCover<P> {
     /// Read int state.
     pub fn read_int_state(&mut self) -> io::Result<IntState> {
@@ -158,14 +219,25 @@ impl<P: state::State + std::marker::Send> BackCover<P> {
     /// Read ADC.
     ///
     /// Reads the Id pin multiple times and returns the median value.
-    pub async fn read_adc(&mut self) -> io::Result<AdcValue> {
-        let mut values = Vec::new();
-        for _ in 0..5 {
-            values.push(self.id.read()?);
-            sleep(Duration::from_millis(10)).await;
+    ///
+    /// If the ADC does not give consistent values, this returns an error.
+    pub async fn read_adc(&mut self) -> Result<AdcValue, AdcReadError> {
+        let mut values = [AdcValue::default(); 5];
+        let mut interval = interval(Duration::from_millis(100));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        for value in &mut values {
+            interval.tick().await;
+            *value = self.id.read()?;
         }
+        log::debug!("ADC readings: {values:?}");
         values.sort();
-        Ok(values[2])
+        let [min, _, median, _, max] = values;
+        // If minimum and maximum differ too much, we consider ADC readings inconsistent.
+        if f64::from(max - min) / f64::from(median) > ACCEPTED_ADC_DIFFERENCE {
+            Err(AdcReadError::Inconsistent)
+        } else {
+            Ok(median)
+        }
     }
 }
 
@@ -250,11 +322,12 @@ impl<P: state::State + std::marker::Send> IsPowered for BackCover<P> {
 
 #[async_trait]
 impl<P: state::State + std::marker::Send> IsPresent for BackCover<P> {
-    type Error = io::Error;
+    type Error = AdcReadError;
 
     async fn is_present(&mut self) -> Result<bool, Self::Error> {
         if self.read_int_state()? == IntState::Low {
-            Ok(self.read_adc().await?.is_toh_present())
+            // This checks INT state again to ensure it remained low after reading ADC
+            Ok(self.read_adc().await?.is_toh_present() && self.read_int_state()? == IntState::Low)
         } else {
             Ok(false)
         }

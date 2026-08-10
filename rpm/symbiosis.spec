@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Jolla Mobile Ltd
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 %global rustflags -Clink-arg=-Wl,-z,relro,-z,now
 
 %if ! %{defined _cargo_offline}
@@ -17,6 +21,8 @@ Source2:        cargo_config
 Source101:      %{name}.service
 Source102:      org.sailfishos.tohd1.service
 Source103:      %{name}.conf
+
+ExclusiveArch:  aarch64
 
 BuildRequires:  cargo >= 1.75.0
 BuildRequires:  rust >= 1.75.0
@@ -123,6 +129,7 @@ fi
 systemctl daemon-reload || :
 
 %files
+%license LICENSES/BSD-3-Clause.txt
 %{_bindir}/%{name}
 %{_datadir}/tohd-1/tohs
 %{systemunitdir}/%{name}.service

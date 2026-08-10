@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Jolla Mobile Ltd
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
 [D-BUS Service]
 Name=org.sailfishos.tohd1
 Exec=/usr/bin/false

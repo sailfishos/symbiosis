@@ -5,6 +5,8 @@ Description=TOH daemon
 Type=dbus
 BusName=org.sailfishos.tohd1
 ExecStart=/usr/bin/symbiosis
+Restart=on-failure
+RestartSec=10s
 
 [Install]
 Alias=dbus-org.sailfishos.tohd1.service

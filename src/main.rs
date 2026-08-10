@@ -172,10 +172,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     } else {
                         None
                     };
-                    back_cover.wait_disconnect_boxed().await?;
+                    // Stop units if something goes wrong before returning result
+                    let disconnect_result = back_cover.wait_disconnect_boxed().await;
                     if let Some(units) = units {
                         units.stop_units().await;
                     }
+                    // If this returns, the daemon stops and it leaves D-Bus anyway
+                    disconnect_result?;
                     object_server.remove::<Toh, _>(TOH_PATH).await?;
                 }
                 Ok(None) => {

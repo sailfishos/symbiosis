@@ -1,0 +1,11 @@
+
+*** THIRD-PARTY LICENSES ***
+
+{{#each licenses}}
+------------------------------------------------------------------------
+Crate: {{#each used_by}}{{#with crate}}{{{name}}} ({{{version}}}){{/with}}{{#unless @last}}, {{/unless}}{{/each}}
+License: {{{name}}}
+SPDX-License-Identifier: {{{id}}}
+
+{{{text}}}
+{{/each}}

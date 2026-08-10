@@ -130,6 +130,7 @@ systemctl daemon-reload || :
 
 %files
 %license LICENSES/BSD-3-Clause.txt
+%license LICENSES/THIRD-PARTY.txt
 %{_bindir}/%{name}
 %{_datadir}/tohd-1/tohs
 %{systemunitdir}/%{name}.service

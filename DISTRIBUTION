@@ -1,0 +1,12 @@
+This file contains some guidelines for distribution in Sailfish OS.
+
+Commit changes to Cargo.lock to keep the versions in check.
+Only build locked versions of the crate.
+
+To downgrade dependencies to supported versions, use 'cargo update --precise <version> crate_name' command.
+
+Update licenses of dependencies by running cargo-about whenever Cargo.lock changes:
+
+    cargo about generate --frozen third-party.hbs > LICENSES/THIRD-PARTY.txt
+
+This file must be included in the RPM.

@@ -101,9 +101,13 @@ pub(crate) enum ServiceType {
     Oneshot,
 }
 
+/// Newtype that guarantees the path is absolute and has a file name.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub(crate) struct Executable(PathBuf);
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Exec {
-    bin: PathBuf,
+    bin: Executable,
     args: Vec<String>,
 }
 
@@ -162,16 +166,25 @@ impl<'de> Visitor<'de> for ExecVisitor {
     {
         if let Some(bin) = access.next_element::<String>()? {
             // Converting this to ensure that it converts back to String later.
-            let bin: PathBuf = bin.into();
-            let mut args = if let Some(capacity) = access.size_hint() {
-                Vec::with_capacity(capacity)
-            } else {
-                Vec::new()
-            };
-            while let Some(arg) = access.next_element::<String>()? {
-                args.push(arg);
+            match Executable::try_from(bin) {
+                Err(InvalidExecutable::NotAbsolutePath) => {
+                    Err(A::Error::missing_field("executable path is not absolute"))
+                }
+                Err(InvalidExecutable::NoFileName) => Err(A::Error::missing_field(
+                    "executable path file name is missing",
+                )),
+                Ok(bin) => {
+                    let mut args = if let Some(capacity) = access.size_hint() {
+                        Vec::with_capacity(capacity)
+                    } else {
+                        Vec::new()
+                    };
+                    while let Some(arg) = access.next_element::<String>()? {
+                        args.push(arg);
+                    }
+                    Ok(Self::Value { bin, args })
+                }
             }
-            Ok(Self::Value { bin, args })
         } else {
             Err(A::Error::missing_field("expected a path to an executable"))
         }
@@ -191,12 +204,7 @@ impl<'de> Deserialize<'de> for Exec {
 ///
 /// Returned when the first value does not have the right format.
 #[derive(Debug, Error)]
-pub(crate) enum BadExecutable {
-    /// Missing executable path.
-    ///
-    /// There must be at least an absolute path to the executable.
-    #[error("Missing executable path")]
-    Missing,
+pub(crate) enum InvalidExecutable {
     /// Missing executable file name.
     ///
     /// Path did not contain file name.
@@ -207,23 +215,63 @@ pub(crate) enum BadExecutable {
     NotAbsolutePath,
 }
 
+impl TryFrom<PathBuf> for Executable {
+    type Error = InvalidExecutable;
+
+    fn try_from(path: PathBuf) -> Result<Self, Self::Error> {
+        if !path.is_absolute() {
+            Err(InvalidExecutable::NotAbsolutePath)
+        } else if path.file_name().is_none() {
+            Err(InvalidExecutable::NoFileName)
+        } else {
+            Ok(Self(path))
+        }
+    }
+}
+
+impl TryFrom<&str> for Executable {
+    type Error = InvalidExecutable;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let path: PathBuf = value.into();
+        path.try_into()
+    }
+}
+
+impl TryFrom<String> for Executable {
+    type Error = InvalidExecutable;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let path: PathBuf = value.into();
+        path.try_into()
+    }
+}
+
+/// Bad executable path provided.
+///
+/// Returned when the first value does not have the right format.
+#[derive(Debug, Error)]
+pub(crate) enum BadExecutable {
+    /// Missing executable path.
+    ///
+    /// There must be at least an absolute path to the executable.
+    #[error("Missing executable path")]
+    Missing,
+    /// Invalid executable.
+    #[error("{0}")]
+    Invalid(#[from] InvalidExecutable),
+}
+
 impl TryFrom<Vec<&str>> for Exec {
     type Error = BadExecutable;
 
     fn try_from(vec: Vec<&str>) -> Result<Self, Self::Error> {
         let mut it = vec.into_iter();
         if let Some(bin) = it.next() {
-            let path: PathBuf = bin.into();
-            if !path.is_absolute() {
-                Err(BadExecutable::NotAbsolutePath)
-            } else if path.file_name().is_none() {
-                Err(BadExecutable::NoFileName)
-            } else {
-                Ok(Self {
-                    bin: path,
-                    args: Vec::from_iter(it.map(ToOwned::to_owned)),
-                })
-            }
+            Ok(Self {
+                bin: bin.try_into()?,
+                args: Vec::from_iter(it.map(ToOwned::to_owned)),
+            })
         } else {
             Err(BadExecutable::Missing)
         }
@@ -233,6 +281,7 @@ impl TryFrom<Vec<&str>> for Exec {
 impl Exec {
     pub(crate) fn path(&self) -> &str {
         self.bin
+            .0
             .to_str()
             .expect("Validity as string was checked during parsing")
     }
@@ -240,6 +289,7 @@ impl Exec {
     pub(crate) fn args(&self) -> Vec<&str> {
         let (_, bin) = self
             .bin
+            .0
             .to_str()
             .expect("Validity as string was checked during parsing")
             .rsplit_once('/')

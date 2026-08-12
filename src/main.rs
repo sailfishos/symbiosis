@@ -153,20 +153,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         } else {
                             Box::new(back_cover.power_down_boxed()?)
                         };
-                    let units = match info.read_configs() {
+                    let (units, permissions) = match info.read_configs() {
                         Err(error) => {
                             warn!("Failed to read config: {error}");
                             None
                         }
                         Ok(Some(configs)) => {
-                            let (overrides, units) = configs.split();
+                            let (overrides, units, permissions) = configs.split();
                             info.apply_overrides(overrides);
-                            Some(units)
+                            Some((units, permissions))
                         }
                         Ok(None) => None,
-                    };
+                    }
+                    .unzip();
                     // Publish TOH on D-Bus before starting services
-                    let toh = Toh::new(info);
+                    let toh = Toh::new(info, permissions.unwrap_or_default());
                     object_server.at(TOH_PATH, toh).await?;
                     let units = if let Some(units) = units {
                         // toh_already_present <=> service is starting + TOH is connected

@@ -10,6 +10,7 @@
 use super::parse::{self, combine};
 use crate::systemd::Manager;
 use crate::toh::Info;
+use std::collections::HashSet;
 use std::fs::read_dir;
 use std::marker::{PhantomData, Send};
 use std::path::PathBuf;
@@ -40,6 +41,7 @@ pub struct Configs {
     overrides: parse::Override,
     system_units: Vec<parse::SystemdUnit>,
     user_units: Vec<parse::SystemdUnit>,
+    access: parse::Access,
 }
 
 /// Overrides from [`Configs`].
@@ -72,6 +74,13 @@ pub struct Units<S: state::State + Send> {
     system_units: Vec<parse::SystemdUnit>,
     user_units: Vec<parse::SystemdUnit>,
     _state: PhantomData<S>,
+}
+
+/// Access permissions from [`Configs`].
+#[derive(Debug, Default)]
+pub struct Permissions {
+    /// Binaries that can access i2c-dev
+    i2c_dev_exe_paths: HashSet<PathBuf>,
 }
 
 impl Configs {
@@ -133,6 +142,7 @@ impl Configs {
             overrides,
             system_unit,
             user_unit,
+            access,
         } = config;
         if let Some(overrides) = overrides {
             self.overrides.with_other(overrides);
@@ -143,14 +153,18 @@ impl Configs {
         if let Some(user_unit) = user_unit {
             self.user_units.push(user_unit);
         }
+        if let Some(access) = access {
+            self.access.i2c_dev.extend(access.i2c_dev);
+        }
     }
 
     /// Splits the config into overrides and unit configurations.
-    pub fn split(self) -> (Overrides, Units<state::Stopped>) {
+    pub fn split(self) -> (Overrides, Units<state::Stopped>, Permissions) {
         let Self {
             overrides,
             system_units,
             user_units,
+            access,
         } = self;
         (
             Overrides { overrides },
@@ -158,6 +172,13 @@ impl Configs {
                 system_units,
                 user_units,
                 _state: PhantomData,
+            },
+            Permissions {
+                i2c_dev_exe_paths: access
+                    .i2c_dev
+                    .into_iter()
+                    .map(|value| value.into())
+                    .collect(),
             },
         )
     }
@@ -271,5 +292,13 @@ impl Units<state::Started> {
             user_units,
             _state: PhantomData,
         }
+    }
+}
+
+impl Permissions {
+    /// Checks if process is allowed to access i2c-dev device.
+    pub(crate) fn is_allowed_for_i2c_dev(&self, pid: i32) -> Result<bool, procfs::ProcError> {
+        let path = procfs::process::Process::new(pid)?.exe()?;
+        Ok(!path.ends_with(" (deleted)") && self.i2c_dev_exe_paths.contains(&path))
     }
 }

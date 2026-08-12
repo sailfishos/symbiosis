@@ -5,11 +5,12 @@
 //! D-Bus server side stuff.
 
 use super::error::*;
-use crate::{i2cdev::I2cDev, power::Power, toh::Info};
-use log::warn;
-use nix::unistd::Group;
+use crate::{
+    i2cdev::I2cDev,
+    power::Power,
+    toh::{config::Permissions, Info},
+};
 use std::collections::HashMap;
-use std::num::NonZeroU32;
 use std::os::fd::AsFd;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -27,12 +28,8 @@ use zvariant::{Fd, Optional, OwnedValue};
 ///
 /// Note that we cannot possibly guarantee that the process borrowing access to the file descriptor
 /// has exclusive access to it but we still try to do that for benefit of well-behaving clients.
-/// The lending out mechanism also helps less privileged clients once the policies around that have
-/// been decided and implemented.
-///
-/// In the future we may hand out these loans to more specific processes, such as those that are
-/// specified in some TOH specific configuration files, so rejection might happen on other reasons
-/// than caller having the wrong user.
+/// The lending out mechanism also helps less privileged clients as they can be defined in TOH
+/// configuration.
 struct Loan {
     /// D-Bus bus name of the process that borrowed the file descriptor.
     owner: UniqueName<'static>,
@@ -44,24 +41,17 @@ struct Loan {
 /// Representation of TOH on D-Bus.
 pub struct Toh {
     info: Info,
+    permissions: Permissions,
     loan: Option<Loan>,
-    privileged_group: Option<NonZeroU32>,
 }
 
 impl Toh {
     /// Create new representation from TOH info.
-    pub fn new(info: Info) -> Self {
-        let privileged_group = Group::from_name("privileged")
-            .ok()
-            .flatten()
-            .and_then(|group| NonZeroU32::new(group.gid.as_raw()));
-        if privileged_group.is_none() {
-            warn!("Privileged gid could not be fetched, methods are not available for privileged group");
-        }
+    pub fn new(info: Info, permissions: Permissions) -> Self {
         Self {
             info,
+            permissions,
             loan: None,
-            privileged_group,
         }
     }
 }
@@ -93,19 +83,13 @@ impl Toh {
         let ok = if creds.unix_user_id().ok_or(BorrowError::NoUid)? == 0 {
             // Root is always okay
             true
-        } else if let Some(privileged_group) = self.privileged_group {
-            // Privileged group is something special on Sailfish OS
+        } else {
             let pid: i32 = creds
                 .process_id()
                 .expect("Process ID is available on Linux")
                 .try_into()
                 .expect("Process ID fits into i32 as it is lower than 4194304");
-            let status = procfs::process::Process::new(pid)?.status()?;
-            status.egid == privileged_group.into()
-                || status.groups.contains(&privileged_group.into())
-        } else {
-            // Currently no-one else can access this
-            false
+            self.permissions.is_allowed_for_i2c_dev(pid)?
         };
         if ok {
             // Enable power for the duration of the loan.
@@ -200,7 +184,8 @@ impl Toh {
     ///
     /// Also powers up the TOH if it was powered down.
     ///
-    /// Currently only available for processes running as root or as privileged group.
+    /// This will only succeed if the caller is root or its executable is allowed in TOH
+    /// configuration.
     async fn borrow_i2c_dev_access(
         &mut self,
         #[zbus(header)] header: Header<'_>,

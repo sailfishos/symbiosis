@@ -5,6 +5,7 @@
 //! Types for parsing config files.
 
 use crate::toh::ExtraValue;
+use derive_more::Into;
 use serde::{de::Error, de::SeqAccess, de::Visitor, Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::fs::File;
@@ -38,6 +39,7 @@ pub(crate) struct Config {
     pub overrides: Option<Override>,
     pub system_unit: Option<SystemdUnit>,
     pub user_unit: Option<SystemdUnit>,
+    pub access: Option<Access>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -102,13 +104,20 @@ pub(crate) enum ServiceType {
 }
 
 /// Newtype that guarantees the path is absolute and has a file name.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Into)]
 pub(crate) struct Executable(PathBuf);
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Exec {
     bin: Executable,
     args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) struct Access {
+    #[serde(default)]
+    pub i2c_dev: Vec<Executable>,
 }
 
 impl Config {
@@ -337,6 +346,7 @@ override:
         assert_eq!(overrides.extra.get("a-boolean"), Some(&false.into()));
         assert!(config.system_unit.is_none());
         assert!(config.user_unit.is_none());
+        assert!(config.access.is_none());
     }
 
     #[test]
@@ -365,6 +375,7 @@ system-unit:
         )
         .unwrap();
         assert!(config.overrides.is_none());
+        assert!(config.access.is_none());
         let unit = config.user_unit.unwrap();
         assert_eq!(unit.name, "my-test-unit");
         assert!(unit.run_on_start);
@@ -393,5 +404,69 @@ system-unit:
             service.exec_stop,
             Some(vec!["/usr/bin/true"].try_into().unwrap())
         );
+    }
+
+    #[test]
+    fn parse_access() {
+        let config: Config = yaml_serde::from_str(
+            "
+--- # Access definition check
+access:
+  i2c-dev:
+    - /bin/foo
+    - /usr/bin/libexec/bar
+",
+        )
+        .unwrap();
+        assert!(config.overrides.is_none());
+        assert!(config.system_unit.is_none());
+        assert!(config.user_unit.is_none());
+        let access = config.access.unwrap();
+        let value: Vec<_> = access
+            .i2c_dev
+            .iter()
+            .map(|p| p.0.to_str().unwrap())
+            .collect();
+        assert_eq!(value, ["/bin/foo", "/usr/bin/libexec/bar"]);
+    }
+
+    #[test]
+    fn parse_alt_access() {
+        let config: Config = yaml_serde::from_str(
+            "
+--- # Alternative access definition
+access:
+  i2c-dev: [\"/bin/foo\", \"/bin/bar\"]
+",
+        )
+        .unwrap();
+        assert!(config.overrides.is_none());
+        assert!(config.system_unit.is_none());
+        assert!(config.user_unit.is_none());
+        let access = config.access.unwrap();
+        let value: Vec<_> = access
+            .i2c_dev
+            .iter()
+            .map(|p| p.0.to_str().unwrap())
+            .collect();
+        assert_eq!(value, ["/bin/foo", "/bin/bar"]);
+    }
+
+    #[test]
+    fn parse_empty_groups() {
+        let config: Config = yaml_serde::from_str(
+            "
+--- # Empty groups
+overrides:
+access:
+system-unit:
+user-unit:
+",
+        )
+        .unwrap();
+        assert!(config.overrides.is_none());
+        assert!(config.system_unit.is_none());
+        assert!(config.user_unit.is_none());
+        assert!(config.access.is_none());
     }
 }

@@ -22,7 +22,6 @@ Future work
 The important known missing parts are:
 
 - Loading, unloading, binding and unbinding drivers for TOHs.
-- More granular access control.
 - Handling of larger memory chips.
 - Proper interrupt handling for TOH interrupt pin.
 
@@ -32,7 +31,7 @@ If you want to get your hands dirty, those are a good place to start.
 Versioning
 ----------
 When tagging this repository, please update the version number in _Cargo.toml_ and in _rpm/symbiosis.spec_.
-The version number following [semantic versioning](https://semver.org/) on best effort basis.
+The version number is following [semantic versioning](https://semver.org/) on best effort basis.
 
 As we are still in zeroth versions until this is considered feature complete enough,
 bump the minor number if there is a breaking change to the public interface,

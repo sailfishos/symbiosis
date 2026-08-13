@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Jolla Mobile Ltd
+#
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Uses blinker example from symbiosis for breathing effect
+
+[Unit]
+Description=Breathing effect
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/usr/libexec/toh/blinker breathing
+ExecStop=-/usr/libexec/toh/blinker off

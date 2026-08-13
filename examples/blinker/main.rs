@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-//! Inari Blue TOH blinker.
+//! TOH blinker for TOHs with AW2023 controller.
 //!
 //! This is just an example of how the chip in the TOH can be used via the tohd1 D-Bus interface and
 //! i2c-dev driver. Actual functionality should be implemented elsewhere.
@@ -16,11 +16,8 @@ use symbiosis::toh::*;
 use tokio::time::sleep;
 use zbus::fdo::Error as DBusError;
 
-const INARI_BLUE_TOH_VENDOR_ID: u16 = 1;
-const INARI_BLUE_TOH_PRODUCT_ID: u16 = 4;
-
 #[derive(FromArgs)]
-#[argh(description = "Control Inari Blue LEDs")]
+#[argh(description = "Control TOH LEDs")]
 struct Arguments {
     #[argh(subcommand)]
     command: Command,
@@ -51,10 +48,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: Avoid errors when reacting to disconnect of a TOH
     match (&toh).detect().await {
         Ok(Some(info)) => {
-            if info.vendor_id == INARI_BLUE_TOH_VENDOR_ID
-                && info.product_id == INARI_BLUE_TOH_PRODUCT_ID
-            {
-                println!("Found Inari Blue TOH");
+            if let Some(ExtraValue::Text(controller)) = info.extra.get("led-controller") {
+                if controller == "aw2023" {
+                    println!(
+                        "Found TOH {:04x}:{:04x} with aw2023 controller",
+                        info.vendor_id, info.product_id
+                    );
+                } else {
+                    return Err("Unknown controller: {controller}".into());
+                }
                 // Leave power on if some effect is running.
                 let leave_powered = !matches!(args.command, Command::Off(_));
                 // The library makes sure we use the borrowing interface correctly here.

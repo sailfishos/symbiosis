@@ -28,9 +28,11 @@ BuildRequires:  cargo >= 1.75.0
 BuildRequires:  rust >= 1.75.0
 BuildRequires:  rust-std-static >= 1.75.0
 
+%define userunitdir %{_prefix}/lib/systemd/user
 %define systemunitdir %{_prefix}/lib/systemd/system
 %define dbussystemservicedir %{_datadir}/dbus-1/system-services
 %define dbussystempolicydir %{_datadir}/dbus-1/system.d
+%define tohdatadir %{_datadir}/tohd-1
 
 %description
 %{summary}.
@@ -42,13 +44,13 @@ Provides: toh-tools = %{version}-%{release}
 %description tools
 %{summary}.
 
-%package examples
-Summary:  Examples for %{name}
+%package examples-blinker
+Summary:  Blinker example for %{name}
 Provides: toh-tools = %{version}-%{release}
 Requires: %{name} = %{version}-%{release}
 
-%description examples
-%{summary}.
+%description examples-blinker
+This provides a simple example that enables breathing effect on Inari Blue TOH.
 
 %prep
 %autosetup -a1 -n %{name}-%{version}
@@ -101,17 +103,21 @@ cargo build -j1 $CARGO_OFFLINE --locked --release --all-targets
 %define rustbuilddir target/aarch64-unknown-linux-gnu/release
 %endif
 
-install -d -m0755 %{buildroot}%{_datadir}/tohd-1/tohs
+install -d -m0755 %{buildroot}%{tohdatadir}/tohs
 install -D -m0755 %{rustbuilddir}/%{name} %{buildroot}%{_bindir}/%{name}
 install -D -m0755 %{rustbuilddir}/create_toh_bin %{buildroot}%{_bindir}/create_toh_bin
 install -D -m0755 %{rustbuilddir}/toh_reader %{buildroot}%{_sbindir}/toh_reader
 install -D -m0755 %{rustbuilddir}/toh_writer %{buildroot}%{_sbindir}/toh_writer
-install -D -m0755 %{rustbuilddir}/examples/blinker %{buildroot}%{_bindir}/blinker
 
 # Systemd unit files and D-Bus configuration
 install -D -m0644 %{SOURCE101} %{buildroot}%{systemunitdir}/%{name}.service
 install -D -m0644 %{SOURCE102} %{buildroot}%{dbussystemservicedir}/org.sailfishos.tohd1.service
 install -D -m0644 %{SOURCE103} %{buildroot}%{dbussystempolicydir}/%{name}.conf
+
+# Blinker example
+install -D -m0755 %{rustbuilddir}/examples/blinker %{buildroot}%{_libexecdir}/toh/blinker
+install -D -m0644 examples/blinker/toh-leds.service %{buildroot}%{userunitdir}/toh-leds.service
+install -D -m0644 examples/blinker/blinker.yaml %{buildroot}%{tohdatadir}/examples/blinker.yaml
 
 %post
 systemctl daemon-reload || :
@@ -128,11 +134,15 @@ then
 fi
 systemctl daemon-reload || :
 
+%post examples-blinker
+systemctl daemon-reload || :
+
 %files
 %license LICENSES/BSD-3-Clause.txt
 %license LICENSES/THIRD-PARTY.txt
 %{_bindir}/%{name}
-%{_datadir}/tohd-1/tohs
+%dir %{tohdatadir}
+%dir %{tohdatadir}/tohs
 %{systemunitdir}/%{name}.service
 %{dbussystemservicedir}/org.sailfishos.tohd1.service
 %{dbussystempolicydir}/%{name}.conf
@@ -142,5 +152,8 @@ systemctl daemon-reload || :
 %{_sbindir}/toh_reader
 %{_sbindir}/toh_writer
 
-%files examples
-%{_bindir}/blinker
+%files examples-blinker
+%{_libexecdir}/toh/blinker
+%dir %{tohdatadir}/examples
+%{tohdatadir}/examples/blinker.yaml
+%{userunitdir}/toh-leds.service

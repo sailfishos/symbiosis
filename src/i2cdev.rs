@@ -4,10 +4,9 @@
 
 //! I²C device.
 
-use crate::back_cover::paths::I2C_PATH;
 use libc::{self, ioctl};
-use std::fs::File;
-use std::io::{Error, Read, Result, Write};
+use std::fs::{read_dir, File};
+use std::io::{Error, ErrorKind, Read, Result, Write};
 use std::os::{
     fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
     unix::fs::{FileTypeExt, MetadataExt},
@@ -19,6 +18,9 @@ const I2C_SLAVE: libc::c_ulong = 0x0703;
 
 // From Linux admin guide
 const I2C_DEV_MAJOR: libc::c_uint = 89;
+
+// TOH I²C bus has address 11d00000
+const I2C_BUS_PATH: &str = "/sys/devices/platform/soc/11d00000.i2c";
 
 /// Checks that the device is char device with major number 89 as those are what Linux uses for
 /// i2c-dev devices.
@@ -38,6 +40,9 @@ impl I2cDev {
     /// Create new instance for path.
     ///
     /// The path must be a i2c-dev device file like `"/dev/i2c-0"`.
+    ///
+    /// Note that TOH bus might not be actually `"/dev/i2c-0"`, thus it is much better to use
+    /// [`toh_dev`](Self::toh_dev) instead of this when trying to access TOH I²C bus.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let file = File::options().read(true).write(true).open(path)?;
         if is_i2c_dev_device(&file)? {
@@ -49,8 +54,33 @@ impl I2cDev {
 
     /// Create new instance for TOH I²C bus.
     pub fn toh_dev() -> Result<Self> {
-        // TODO: Get path properly to avoid accidentally writing something unintended
-        I2cDev::new(I2C_PATH)
+        // Note that this would not handle multiple results properly
+        let number = read_dir(I2C_BUS_PATH)?
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_type()
+                    .map(|metadata| metadata.is_dir())
+                    .unwrap_or(false)
+            })
+            .map(|entry| entry.file_name())
+            .filter_map(|name| {
+                let name = name.to_str()?;
+                if name.starts_with("i2c-") {
+                    let (_, number) = name.split_at(4);
+                    number.parse::<u8>().ok()
+                } else {
+                    None
+                }
+            })
+            .next()
+            .ok_or(Error::new(
+                ErrorKind::NotFound,
+                "i2c-dev directory was not found in i2c bus directory, is the driver loaded?",
+            ))?;
+        let path = format!("/dev/i2c-{number}");
+        log::debug!("Found TOH i2c-dev device '{path}'");
+        I2cDev::new(path)
     }
 
     /// Create new instance from file descriptor.

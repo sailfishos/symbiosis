@@ -22,7 +22,6 @@ use tokio::time::{interval, sleep, MissedTickBehavior};
 const ACCEPTED_ADC_DIFFERENCE: f64 = 0.005; // 0.5 %
 
 pub(crate) mod paths {
-    pub(crate) const I2C_PATH: &str = "/dev/i2c-0";
     pub(crate) const PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
     pub(crate) const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
     pub(crate) const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";

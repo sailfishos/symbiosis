@@ -361,7 +361,11 @@ impl BackCover<state::Present256BBlocks> {
                     self.i2c.read_exact(&mut buf)?;
                     result.extend(buf);
                 }
-                Err(error) if error.raw_os_error() == Some(libc::ENXIO) && address != 0x50 => {
+                Err(error)
+                    if (error.kind() == io::ErrorKind::NotFound
+                        || error.raw_os_error() == Some(libc::ENXIO))
+                        && address != 0x50 =>
+                {
                     // No more blocks, all read.
                     return Ok(result);
                 }

@@ -7,6 +7,9 @@ override:
   led-controller: aw2023
 access:
   i2c-dev: ["/usr/libexec/toh/blinker"]
+devices:
+  - address: 0x45
+    name: aw2023
 user-unit:
   type: service
   service-name: toh-leds.service

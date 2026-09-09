@@ -7,4 +7,4 @@
 mod configs;
 pub(crate) mod parse;
 
-pub use configs::{ConfigError, Configs, Overrides, Permissions, Units};
+pub use configs::{ConfigError, Configs, Devices, Overrides, Permissions, Units};

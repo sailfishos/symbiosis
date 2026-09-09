@@ -30,6 +30,7 @@ pub(crate) mod paths {
 
 mod state {
     pub trait State {}
+    pub trait Present {}
 
     /// TOH has not been been detected.
     pub struct Detached {}
@@ -51,6 +52,9 @@ mod state {
     impl State for Attached {}
     impl State for Present256BBlocks {}
     impl State for Present64kBBlocks {}
+
+    impl Present for Present256BBlocks {}
+    impl Present for Present64kBBlocks {}
 }
 
 /// TOH implementation that talks via I²C and GPIO.
@@ -447,5 +451,28 @@ impl Detect for BackCover<state::Present64kBBlocks> {
             io::ErrorKind::Unsupported,
             "Not implemented yet",
         )))
+    }
+}
+
+/// Trait for [`enable_target_devices`](Self::enable_target_devices) method.
+pub trait EnableTargetDevices {
+    /// Enable target devices from config.
+    ///
+    /// Consumes the [`Devices`] instance.
+    fn enable_target_devices(&mut self, targets: Devices) -> io::Result<()>;
+}
+
+impl<P: state::State + std::marker::Send + state::Present> EnableTargetDevices for BackCover<P> {
+    fn enable_target_devices(&mut self, targets: Devices) -> io::Result<()> {
+        for config::parse::Device {
+            address,
+            name,
+            driver: _,
+        } in targets.0.into_iter()
+        {
+            self.bus.add_target(address, name.as_deref())?;
+        }
+        // TODO: Bind drivers
+        Ok(())
     }
 }

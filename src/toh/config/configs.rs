@@ -12,7 +12,7 @@ use crate::systemd::Manager;
 use crate::toh::Info;
 use std::collections::HashSet;
 use std::fs::read_dir;
-use std::marker::{PhantomData, Send};
+use std::marker::Send;
 use std::path::PathBuf;
 use thiserror::Error;
 use yaml_serde::Error as YamlError;
@@ -61,7 +61,9 @@ mod state {
     pub struct Stopped;
 
     /// Services have been started.
-    pub struct Started;
+    pub struct Started {
+        pub user_bus_connection: Option<zbus::Connection>,
+    }
 
     impl State for Stopped {}
     impl State for Started {}
@@ -74,7 +76,7 @@ mod state {
 pub struct Units<S: state::State + Send> {
     system_units: Vec<parse::SystemdUnit>,
     user_units: Vec<parse::SystemdUnit>,
-    _state: PhantomData<S>,
+    state: S,
 }
 
 /// Access permissions from [`Configs`].
@@ -180,7 +182,7 @@ impl Configs {
             Units {
                 system_units,
                 user_units,
-                _state: PhantomData,
+                state: state::Stopped,
             },
             Permissions {
                 i2c_dev_exe_paths: access
@@ -232,9 +234,11 @@ impl Units<state::Stopped> {
                 }
             }
         }
+        let mut connection = None;
         if !user_units.is_empty() {
             match Manager::session().await {
                 Ok(mut manager) => {
+                    connection = Some(manager.connection().clone());
                     for unit in user_units
                         .iter()
                         .filter(|unit| !on_service_start || unit.run_on_start)
@@ -253,7 +257,9 @@ impl Units<state::Stopped> {
         Units {
             system_units,
             user_units,
-            _state: PhantomData,
+            state: state::Started {
+                user_bus_connection: connection,
+            },
         }
     }
 }
@@ -264,7 +270,9 @@ impl Units<state::Started> {
         let Self {
             system_units,
             user_units,
-            ..
+            state: state::Started {
+                user_bus_connection: conn,
+            },
         } = self;
         if !system_units.is_empty() {
             match Manager::system().await {
@@ -282,7 +290,8 @@ impl Units<state::Started> {
             }
         }
         if !user_units.is_empty() {
-            match Manager::session().await {
+            let conn = conn.expect("There are user units so there must be a connection too");
+            match Manager::for_connection(conn).await {
                 Ok(mut manager) => {
                     for unit in &user_units {
                         log::debug!("Stopping {} in user session", unit.name);
@@ -299,7 +308,7 @@ impl Units<state::Started> {
         Units {
             system_units,
             user_units,
-            _state: PhantomData,
+            state: state::Stopped,
         }
     }
 }

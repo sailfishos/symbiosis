@@ -101,9 +101,7 @@ impl<'p> Manager<'p> {
     /// Get manager for system session.
     pub async fn system() -> Result<Self, Error> {
         let connection = Connection::system().await?;
-        Ok(Self {
-            proxy: proxies::ManagerProxy::new(&connection).await?,
-        })
+        Self::for_connection(connection).await
     }
 
     /// Get manager for active seat0 user session.
@@ -134,9 +132,19 @@ impl<'p> Manager<'p> {
                 .build()
                 .await?;
 
+        Self::for_connection(connection).await
+    }
+
+    /// Get manager for connection.
+    pub async fn for_connection(connection: Connection) -> Result<Self, Error> {
         Ok(Self {
             proxy: proxies::ManagerProxy::new(&connection).await?,
         })
+    }
+
+    /// D-Bus connection for the manager proxy.
+    pub fn connection(&self) -> &Connection {
+        self.proxy.inner().connection()
     }
 
     async fn wait_for_job(

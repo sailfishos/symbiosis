@@ -18,7 +18,10 @@ use symbiosis::{
     toh::{Detect, IsPresent},
 };
 use systemd_journal_logger::JournalLog;
-use tokio::time::{sleep, timeout};
+use tokio::{
+    join,
+    time::{sleep, timeout},
+};
 use zbus::{fdo::ObjectManager, Connection};
 
 const SERVICE_NAME: &str = "org.sailfishos.tohd1";
@@ -175,15 +178,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     // Publish TOH on D-Bus before starting services
                     let toh = Toh::new(info, permissions.unwrap_or_default());
                     object_server.at(TOH_PATH, toh).await?;
-                    let units = if let Some(units) = units {
-                        // toh_already_present <=> service is starting + TOH is connected
-                        Some(units.start_units(toh_already_present).await)
+
+                    // Wait for disconnect already while starting units
+                    let disconnect_future = back_cover.wait_disconnect_boxed();
+                    let (disconnect_result, units) = if let Some(units) = units {
+                        let (result, units) = join!(
+                            disconnect_future,
+                            // toh_already_present <=> service is starting + TOH is connected
+                            units.start_units(toh_already_present),
+                        );
+                        (result, Some(units))
                     } else {
-                        None
+                        (disconnect_future.await, None)
                     };
 
                     // Stop units if something goes wrong before returning result
-                    let disconnect_result = back_cover.wait_disconnect_boxed().await;
                     if let Some(units) = units {
                         units.stop_units().await;
                     }

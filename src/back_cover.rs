@@ -6,6 +6,7 @@
 //!
 //! Uses I²C and GPIO to talk with TOH.
 
+use crate::bus::I2cBus;
 use crate::i2cdev::I2cDev;
 use crate::id::{AdcValue, Id, TohId};
 use crate::interrupt::{IntState, Interrupt};
@@ -22,7 +23,6 @@ use tokio::time::{interval, sleep, MissedTickBehavior};
 const ACCEPTED_ADC_DIFFERENCE: f64 = 0.005; // 0.5 %
 
 pub(crate) mod paths {
-    pub(crate) const I2C_PATH: &str = "/dev/i2c-0";
     pub(crate) const PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
     pub(crate) const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
     pub(crate) const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
@@ -30,6 +30,7 @@ pub(crate) mod paths {
 
 mod state {
     pub trait State {}
+    pub trait Present {}
 
     /// TOH has not been been detected.
     pub struct Detached {}
@@ -51,6 +52,9 @@ mod state {
     impl State for Attached {}
     impl State for Present256BBlocks {}
     impl State for Present64kBBlocks {}
+
+    impl Present for Present256BBlocks {}
+    impl Present for Present64kBBlocks {}
 }
 
 /// TOH implementation that talks via I²C and GPIO.
@@ -59,6 +63,7 @@ pub struct BackCover<P: state::State + std::marker::Send> {
     i2c: I2cDev,
     int: Interrupt,
     pwr: Power<power::ReadWrite>,
+    bus: I2cBus,
     _state: PhantomData<P>,
 }
 
@@ -77,14 +82,16 @@ impl BackCover<state::Detached> {
     ///
     /// Requires _root_ access and thus is mainly only good for the daemon.
     pub fn new() -> io::Result<Self> {
+        let bus = I2cBus::toh_bus()?;
         // TODO: Handle also the buffer chip power
         let mut pwr = Power::new()?;
         pwr.set_power(false)?;
         Ok(Self {
             id: Id::new()?,
             int: Interrupt::new()?,
-            i2c: I2cDev::toh_dev()?,
+            i2c: bus.i2c_dev()?,
             pwr,
+            bus,
             _state: PhantomData,
         })
     }
@@ -95,13 +102,19 @@ impl BackCover<state::Detached> {
     pub async fn wait_connect(mut self) -> io::Result<BackCover<state::Attached>> {
         self.int.watch(IntState::Low).await?;
         let BackCover {
-            id, i2c, int, pwr, ..
+            id,
+            i2c,
+            int,
+            pwr,
+            bus,
+            ..
         } = self;
         Ok(BackCover {
             id,
             i2c,
             int,
             pwr,
+            bus,
             _state: PhantomData,
         })
     }
@@ -163,6 +176,7 @@ impl BackCover<state::Attached> {
             i2c,
             int,
             mut pwr,
+            bus,
             ..
         } = self;
         // TODO: Is there a better way to represent this so we don't need to spell out these all?
@@ -172,6 +186,7 @@ impl BackCover<state::Attached> {
                 i2c,
                 int,
                 pwr,
+                bus,
                 _state: PhantomData::<state::Present256BBlocks>,
             })),
             TohId::R15k => Ok(Variant::With64kBBlocks(BackCover {
@@ -179,6 +194,7 @@ impl BackCover<state::Attached> {
                 i2c,
                 int,
                 pwr,
+                bus,
                 _state: PhantomData::<state::Present64kBBlocks>,
             })),
             TohId::NotPresent => {
@@ -194,6 +210,7 @@ impl BackCover<state::Attached> {
                     i2c,
                     int,
                     pwr,
+                    bus,
                     _state: PhantomData::<state::Attached>,
                 }))
             }
@@ -260,6 +277,7 @@ impl<P: state::State + std::marker::Send> PowerDown for BackCover<P> {
             i2c,
             int,
             mut pwr,
+            bus,
             ..
         } = self;
         pwr.set_power(false)?;
@@ -268,6 +286,7 @@ impl<P: state::State + std::marker::Send> PowerDown for BackCover<P> {
             i2c,
             int,
             pwr,
+            bus,
             _state: PhantomData,
         })
     }
@@ -309,13 +328,20 @@ impl<P: state::State + std::marker::Send> WaitDisconnect for BackCover<P> {
             }
         }
         let BackCover {
-            id, i2c, int, pwr, ..
+            id,
+            i2c,
+            int,
+            pwr,
+            mut bus,
+            ..
         } = self;
+        bus.remove_all_targets()?;
         Ok(BackCover {
             id,
             i2c,
             int,
             pwr,
+            bus,
             _state: PhantomData,
         })
     }
@@ -354,20 +380,30 @@ impl BackCover<state::Present256BBlocks> {
         let mut result = Vec::new();
         let mut buf = [0; 256];
         for address in 0x50..0x60 {
+            // Since I3C wrapper driver for I²C cannot be used without configuring devices first, we
+            // are creating the devices on the bus before using them.
+            let target = self.bus.add_target(address, None)?;
             // Set target address, this won't actually do anything on the bus.
-            self.i2c.set_target_address(address)?;
+            self.i2c.set_target_address(address.into())?;
             // Set data address to zero which can fail if there is no such chip.
             match self.i2c.write_all(&[0]) {
                 Ok(_) => {
                     self.i2c.read_exact(&mut buf)?;
                     result.extend(buf);
+                    target.remove()?;
                 }
-                Err(error) if error.raw_os_error() == Some(libc::ENXIO) && address != 0x50 => {
+                Err(error)
+                    if (error.kind() == io::ErrorKind::NotFound
+                        || error.raw_os_error() == Some(libc::ENXIO))
+                        && address != 0x50 =>
+                {
                     // No more blocks, all read.
+                    target.remove()?;
                     return Ok(result);
                 }
                 Err(error) => {
                     // Something else went wrong.
+                    let _ = target.remove();
                     return Err(error);
                 }
             }
@@ -381,7 +417,7 @@ impl BackCover<state::Present256BBlocks> {
 pub enum DetectionError {
     /// IO error happened.
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
     /// Parsing error happened.
     #[error("Parsing error: {0}")]
     Parse(#[from] ParseError),
@@ -415,5 +451,28 @@ impl Detect for BackCover<state::Present64kBBlocks> {
             io::ErrorKind::Unsupported,
             "Not implemented yet",
         )))
+    }
+}
+
+/// Trait for [`enable_target_devices`](Self::enable_target_devices) method.
+pub trait EnableTargetDevices {
+    /// Enable target devices from config.
+    ///
+    /// Consumes the [`Devices`] instance.
+    fn enable_target_devices(&mut self, targets: Devices) -> io::Result<()>;
+}
+
+impl<P: state::State + std::marker::Send + state::Present> EnableTargetDevices for BackCover<P> {
+    fn enable_target_devices(&mut self, targets: Devices) -> io::Result<()> {
+        for config::parse::Device {
+            address,
+            name,
+            driver: _,
+        } in targets.0.into_iter()
+        {
+            self.bus.add_target(address, name.as_deref())?;
+        }
+        // TODO: Bind drivers
+        Ok(())
     }
 }

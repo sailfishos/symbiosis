@@ -4,7 +4,7 @@
 
 //! I²C device.
 
-use crate::back_cover::paths::I2C_PATH;
+use crate::bus::find_toh_i2c_bus;
 use libc::{self, ioctl};
 use std::fs::File;
 use std::io::{Error, Read, Result, Write};
@@ -38,6 +38,9 @@ impl I2cDev {
     /// Create new instance for path.
     ///
     /// The path must be a i2c-dev device file like `"/dev/i2c-0"`.
+    ///
+    /// Note that TOH bus might not be actually `"/dev/i2c-0"`, thus it is much better to use
+    /// [`toh_dev`](Self::toh_dev) instead of this when trying to access TOH I²C bus.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let file = File::options().read(true).write(true).open(path)?;
         if is_i2c_dev_device(&file)? {
@@ -47,10 +50,17 @@ impl I2cDev {
         }
     }
 
+    /// Create instance for specified bus.
+    pub(crate) fn for_bus(bus: u8) -> Result<Self> {
+        let path = format!("/dev/i2c-{bus}");
+        log::debug!("Created TOH i2c-dev device for '{path}'");
+        I2cDev::new(path)
+    }
+
     /// Create new instance for TOH I²C bus.
     pub fn toh_dev() -> Result<Self> {
-        // TODO: Get path properly to avoid accidentally writing something unintended
-        I2cDev::new(I2C_PATH)
+        let bus = find_toh_i2c_bus()?;
+        Self::for_bus(bus)
     }
 
     /// Create new instance from file descriptor.

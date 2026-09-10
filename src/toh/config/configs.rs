@@ -42,6 +42,7 @@ pub struct Configs {
     system_units: Vec<parse::SystemdUnit>,
     user_units: Vec<parse::SystemdUnit>,
     access: parse::Access,
+    devices: Vec<parse::Device>,
 }
 
 /// Overrides from [`Configs`].
@@ -82,6 +83,10 @@ pub struct Permissions {
     /// Binaries that can access i2c-dev
     i2c_dev_exe_paths: HashSet<PathBuf>,
 }
+
+/// Bound target devices on bus from [`Configs`].
+#[derive(Debug, Default)]
+pub struct Devices(pub(crate) Vec<parse::Device>);
 
 impl Configs {
     pub(crate) fn find(vendor_id: u16, product_id: u16) -> Result<Option<Self>, ConfigError> {
@@ -143,6 +148,7 @@ impl Configs {
             system_unit,
             user_unit,
             access,
+            devices,
         } = config;
         if let Some(overrides) = overrides {
             self.overrides.with_other(overrides);
@@ -156,18 +162,21 @@ impl Configs {
         if let Some(access) = access {
             self.access.i2c_dev.extend(access.i2c_dev);
         }
+        self.devices.extend(devices);
     }
 
     /// Splits the config into overrides and unit configurations.
-    pub fn split(self) -> (Overrides, Units<state::Stopped>, Permissions) {
+    pub fn split(self) -> (Overrides, Devices, Units<state::Stopped>, Permissions) {
         let Self {
             overrides,
+            devices,
             system_units,
             user_units,
             access,
         } = self;
         (
             Overrides { overrides },
+            Devices(devices),
             Units {
                 system_units,
                 user_units,

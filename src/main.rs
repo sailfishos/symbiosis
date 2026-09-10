@@ -11,7 +11,8 @@ use std::error::Error;
 use std::time::Duration;
 use symbiosis::{
     back_cover::{
-        BackCover, DetectionError, IdentificationError, PowerDown, Variant, WaitDisconnect,
+        BackCover, DetectionError, EnableTargetDevices, IdentificationError, PowerDown, Variant,
+        WaitDisconnect,
     },
     dbus::server::Toh,
     toh::{Detect, IsPresent},
@@ -27,12 +28,12 @@ const TOH_PATH: &str = "/org/sailfishos/tohd1/toh";
 // TODO: Remove this when we have proper interrupt handling
 const DISCONNECT_WAIT: Duration = Duration::from_secs(10);
 
-trait BackCoverDetect: WaitDisconnect + Detect + PowerDown {
+trait BackCoverDetect: WaitDisconnect + Detect + PowerDown + EnableTargetDevices {
     // Rust 1.86.0 gets rid of this
     fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect>;
 }
 
-impl<T: WaitDisconnect + Detect + PowerDown + 'static> BackCoverDetect for T {
+impl<T: WaitDisconnect + Detect + PowerDown + EnableTargetDevices + 'static> BackCoverDetect for T {
     // Rust 1.86.0 gets rid of this
     fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect> {
         self
@@ -147,25 +148,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
             sleep(Duration::from_millis(100)).await;
             match back_cover.detect().await {
                 Ok(Some(mut info)) => {
-                    let back_cover: Box<dyn WaitDisconnect> =
-                        if info.leave_power_on.unwrap_or(false) {
-                            back_cover.cast_to_wait_disconnect()
-                        } else {
-                            Box::new(back_cover.power_down_boxed()?)
-                        };
                     let (units, permissions) = match info.read_configs() {
                         Err(error) => {
                             warn!("Failed to read config: {error}");
                             None
                         }
                         Ok(Some(configs)) => {
-                            let (overrides, units, permissions) = configs.split();
+                            let (overrides, devices, units, permissions) = configs.split();
                             info.apply_overrides(overrides);
+                            // Expose configured I²C addresses and load drivers.
+                            back_cover.enable_target_devices(devices)?;
                             Some((units, permissions))
                         }
                         Ok(None) => None,
                     }
                     .unzip();
+
+                    // Power down if requested.
+                    let back_cover: Box<dyn WaitDisconnect> =
+                        if info.leave_power_on.unwrap_or(false) {
+                            back_cover.cast_to_wait_disconnect()
+                        } else {
+                            Box::new(back_cover.power_down_boxed()?)
+                        };
+
                     // Publish TOH on D-Bus before starting services
                     let toh = Toh::new(info, permissions.unwrap_or_default());
                     object_server.at(TOH_PATH, toh).await?;
@@ -175,6 +181,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     } else {
                         None
                     };
+
                     // Stop units if something goes wrong before returning result
                     let disconnect_result = back_cover.wait_disconnect_boxed().await;
                     if let Some(units) = units {

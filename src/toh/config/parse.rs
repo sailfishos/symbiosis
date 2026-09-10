@@ -40,6 +40,8 @@ pub(crate) struct Config {
     pub system_unit: Option<SystemdUnit>,
     pub user_unit: Option<SystemdUnit>,
     pub access: Option<Access>,
+    #[serde(default)]
+    pub devices: Vec<Device>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -118,6 +120,13 @@ pub(crate) struct Exec {
 pub(crate) struct Access {
     #[serde(default)]
     pub i2c_dev: Vec<Executable>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub(crate) struct Device {
+    pub address: u8,
+    pub name: Option<String>,
+    pub driver: Option<String>,
 }
 
 impl Config {
@@ -453,6 +462,66 @@ access:
     }
 
     #[test]
+    fn parse_devices() {
+        let config: Config = yaml_serde::from_str(
+            "
+--- # Device definitions
+devices:
+  - address: 0x45
+  - address: 0x60
+    name: abc
+  - name: something else
+    address: 0xAF
+  - address: 0xff
+  - address: 250
+  - address: 10
+    name: testing
+    driver: foo
+",
+        )
+        .unwrap();
+        assert!(config.overrides.is_none());
+        assert!(config.system_unit.is_none());
+        assert!(config.user_unit.is_none());
+        assert!(config.access.is_none());
+        assert_eq!(
+            config.devices,
+            vec![
+                Device {
+                    address: 0x45,
+                    name: None,
+                    driver: None,
+                },
+                Device {
+                    address: 0x60,
+                    name: Some("abc".to_owned()),
+                    driver: None,
+                },
+                Device {
+                    address: 0xAF,
+                    name: Some("something else".to_owned()),
+                    driver: None,
+                },
+                Device {
+                    address: 0xff,
+                    name: None,
+                    driver: None,
+                },
+                Device {
+                    address: 250,
+                    name: None,
+                    driver: None,
+                },
+                Device {
+                    address: 10,
+                    name: Some("testing".to_owned()),
+                    driver: Some("foo".to_owned())
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn parse_empty_groups() {
         let config: Config = yaml_serde::from_str(
             "
@@ -461,6 +530,7 @@ overrides:
 access:
 system-unit:
 user-unit:
+devices:
 ",
         )
         .unwrap();
@@ -468,5 +538,6 @@ user-unit:
         assert!(config.system_unit.is_none());
         assert!(config.user_unit.is_none());
         assert!(config.access.is_none());
+        assert!(config.devices.is_empty());
     }
 }

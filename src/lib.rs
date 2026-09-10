@@ -11,6 +11,7 @@
 //! include this code.
 
 pub mod back_cover;
+pub mod bus;
 pub mod dbus;
 pub mod errors;
 pub mod i2cdev;

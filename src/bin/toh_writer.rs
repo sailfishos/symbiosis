@@ -11,7 +11,7 @@ use std::ops::Rem;
 use std::thread::sleep;
 use std::time::Duration;
 
-use symbiosis::i2cdev::I2cDev;
+use symbiosis::bus::I2cBus;
 use symbiosis::id::{Id, TohId};
 use symbiosis::interrupt::{IntState, Interrupt};
 use symbiosis::power::Power;
@@ -97,10 +97,12 @@ fn get_file_size(file: &mut File) -> Result<u64, std::io::Error> {
 
 /// Use I²C to write the chip
 fn write_chip(
-    i2c: &mut I2cDev,
+    bus: &mut I2cBus,
     file: &mut File,
     page_size: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let mut i2c = bus.i2c_dev()?;
+
     // Let's check how many bytes we have to read
     let size = get_file_size(file)?;
     // TODO: Support other types of memory chips
@@ -124,6 +126,7 @@ fn write_chip(
     let mut written: usize = 0;
 
     for address in 0x50..0x50 + size.div_ceil(256) {
+        let target = bus.add_target(address.try_into().expect("Fits"), None)?;
         i2c.set_target_address(address)?;
 
         let start = written - written.rem(256);
@@ -142,6 +145,8 @@ fn write_chip(
             write!(lock, ".")?;
             lock.flush()?;
         }
+
+        target.remove()?;
     }
     writeln!(lock)?;
     writeln!(lock, "{} bytes written", written)?;
@@ -149,7 +154,9 @@ fn write_chip(
 }
 
 /// Use I²C to verify the chip
-fn verify_chip(i2c: &mut I2cDev, file: &mut File) -> Result<(), Box<dyn std::error::Error>> {
+fn verify_chip(bus: &mut I2cBus, file: &mut File) -> Result<(), Box<dyn std::error::Error>> {
+    let mut i2c = bus.i2c_dev()?;
+
     // Let's check how many bytes we have to verify
     let size = get_file_size(file)?;
 
@@ -172,7 +179,8 @@ fn verify_chip(i2c: &mut I2cDev, file: &mut File) -> Result<(), Box<dyn std::err
             break;
         }
 
-        i2c.set_target_address(address)?;
+        let target = bus.add_target(address, None)?;
+        i2c.set_target_address(address.into())?;
 
         // Set data address to zero
         i2c.write_all(&[0])?;
@@ -212,6 +220,8 @@ fn verify_chip(i2c: &mut I2cDev, file: &mut File) -> Result<(), Box<dyn std::err
         verified += length as u64;
         write!(lock, ".")?;
         lock.flush()?;
+
+        target.remove()?;
     }
     writeln!(lock)?;
     if size == verified {
@@ -232,7 +242,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     wait_for_int()?;
     test_adc_pin()?;
     with_power(|| {
-        let mut i2c = I2cDev::toh_dev()?;
+        let mut i2c = I2cBus::toh_bus()?;
         write_chip(&mut i2c, &mut file, args.page_size.into())
             .and_then(|()| verify_chip(&mut i2c, &mut file))
     })

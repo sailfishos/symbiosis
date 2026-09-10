@@ -22,7 +22,7 @@ mod proxies {
     )]
     pub(crate) trait Seat {
         #[zbus(property)]
-        fn sessions(&self) -> Result<Vec<(String, OwnedObjectPath)>>;
+        fn active_session(&self) -> Result<(String, OwnedObjectPath)>;
     }
 
     #[proxy(
@@ -98,6 +98,7 @@ pub(crate) struct Manager<'p> {
 }
 
 impl<'p> Manager<'p> {
+    /// Get manager for system session.
     pub async fn system() -> Result<Self, Error> {
         let connection = Connection::system().await?;
         Ok(Self {
@@ -105,30 +106,37 @@ impl<'p> Manager<'p> {
         })
     }
 
+    /// Get manager for active seat0 user session.
+    ///
+    /// Waits for user session to start.
     pub async fn session() -> Result<Self, Error> {
         // Get user for session of seat0 to use in D-Bus object path
         let dbus = Connection::system().await?;
         let seat = proxies::SeatProxy::new(&dbus).await?;
-        for (session, object_path) in seat.sessions().await? {
-            if session == "1" {
-                let session = proxies::SessionProxy::new(&dbus, object_path).await?;
-                let (uid, _) = session.user().await?;
+        let mut stream = seat.receive_active_session_changed().await;
+        let (session, mut object_path) = seat.active_session().await?;
+        if session.is_empty() {
+            // Session is not there yet, wait for property changes.
+            while let Some(session) = stream.next().await {
+                let (session, path) = session.get().await?;
+                if !session.is_empty() {
+                    object_path = path;
+                    break;
+                }
+            }
+        }
+        let session = proxies::SessionProxy::new(&dbus, object_path).await?;
+        let (uid, _) = session.user().await?;
 
-                // Build connection for the user
-                let connection = Builder::address(
-                    format!("unix:path=/run/user/{}/dbus/user_bus_socket", uid).as_str(),
-                )?
+        // Build connection for the user
+        let connection =
+            Builder::address(format!("unix:path=/run/user/{}/dbus/user_bus_socket", uid).as_str())?
                 .build()
                 .await?;
 
-                return Ok(Self {
-                    proxy: proxies::ManagerProxy::new(&connection).await?,
-                });
-            }
-        }
-        Err(zbus::Error::Failure(
-            "No session 1 on seat0 found".to_owned(),
-        ))
+        Ok(Self {
+            proxy: proxies::ManagerProxy::new(&connection).await?,
+        })
     }
 
     async fn wait_for_job(

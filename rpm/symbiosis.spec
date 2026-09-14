@@ -55,6 +55,15 @@ Requires(post): systemd
 %description examples-blinker
 This provides a simple example that enables breathing effect on Inari Blue TOH.
 
+%package examples-i2c-speed-test
+Summary:  Speed test example for %{name}
+Provides: toh-tools = %{version}-%{release}
+Requires: %{name} = %{version}-%{release}
+
+%description examples-i2c-speed-test
+This provides a simple example that tests I²C performance. Make a symlink for
+your TOH to enable it.
+
 %prep
 %autosetup -a1 -n %{name}-%{version}
 
@@ -127,6 +136,10 @@ install -D -m0755 %{rustbuilddir}/examples/blinker %{buildroot}%{_libexecdir}/to
 install -D -m0644 examples/blinker/toh-leds.service %{buildroot}%{userunitdir}/toh-leds.service
 install -D -m0644 examples/blinker/blinker.yaml %{buildroot}%{tohdatadir}/examples/blinker.yaml
 
+# Speed test example
+install -D -m0755 %{rustbuilddir}/examples/i2c-speed-test %{buildroot}%{_libexecdir}/toh/i2c-speed-test
+install -D -m0644 examples/i2c-speed-test/i2c-speed-test.yaml %{buildroot}%{tohdatadir}/examples/i2c-speed-test.yaml
+
 %post
 systemctl daemon-reload || :
 systemctl reload-or-try-restart %{name}.service || :
@@ -159,3 +172,8 @@ systemctl daemon-reload || :
 %dir %{tohdatadir}/examples
 %{tohdatadir}/examples/blinker.yaml
 %{userunitdir}/toh-leds.service
+
+%files examples-i2c-speed-test
+%{_libexecdir}/toh/i2c-speed-test
+%dir %{tohdatadir}/examples
+%{tohdatadir}/examples/i2c-speed-test.yaml

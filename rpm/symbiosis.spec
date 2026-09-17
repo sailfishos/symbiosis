@@ -27,6 +27,8 @@ ExclusiveArch:  aarch64
 BuildRequires:  cargo >= 1.75.0
 BuildRequires:  rust >= 1.75.0
 BuildRequires:  rust-std-static >= 1.75.0
+Requires(post): systemd
+Requires(postun): systemd
 
 %define userunitdir %{_prefix}/lib/systemd/user
 %define systemunitdir %{_prefix}/lib/systemd/system
@@ -48,6 +50,7 @@ Provides: toh-tools = %{version}-%{release}
 Summary:  Blinker example for %{name}
 Provides: toh-tools = %{version}-%{release}
 Requires: %{name} = %{version}-%{release}
+Requires(post): systemd
 
 %description examples-blinker
 This provides a simple example that enables breathing effect on Inari Blue TOH.
@@ -114,6 +117,11 @@ install -D -m0644 %{SOURCE101} %{buildroot}%{systemunitdir}/%{name}.service
 install -D -m0644 %{SOURCE102} %{buildroot}%{dbussystemservicedir}/org.sailfishos.tohd1.service
 install -D -m0644 %{SOURCE103} %{buildroot}%{dbussystempolicydir}/%{name}.conf
 
+# Packaged symlinks for unit install (alias and enable)
+mkdir -p %{buildroot}%{systemunitdir}/multi-user.target.wants
+ln -s %{name}.service %{buildroot}%{systemunitdir}/dbus-org.sailfishos.tohd1.service
+ln -s ../%{name}.service %{buildroot}%{systemunitdir}/multi-user.target.wants/
+
 # Blinker example
 install -D -m0755 %{rustbuilddir}/examples/blinker %{buildroot}%{_libexecdir}/toh/blinker
 install -D -m0644 examples/blinker/toh-leds.service %{buildroot}%{userunitdir}/toh-leds.service
@@ -121,17 +129,9 @@ install -D -m0644 examples/blinker/blinker.yaml %{buildroot}%{tohdatadir}/exampl
 
 %post
 systemctl daemon-reload || :
-if [ $1 == 1 ]
-then
-    systemctl enable --now %{name}.service || :
-fi
 systemctl reload-or-try-restart %{name}.service || :
 
 %postun
-if [ $1 == 0 ]
-then
-    systemctl disable --now %{name}.service || :
-fi
 systemctl daemon-reload || :
 
 %post examples-blinker
@@ -144,6 +144,8 @@ systemctl daemon-reload || :
 %dir %{tohdatadir}
 %dir %{tohdatadir}/tohs
 %{systemunitdir}/%{name}.service
+%{systemunitdir}/dbus-org.sailfishos.tohd1.service
+%{systemunitdir}/multi-user.target.wants/%{name}.service
 %{dbussystemservicedir}/org.sailfishos.tohd1.service
 %{dbussystempolicydir}/%{name}.conf
 

@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Jolla Mobile Ltd
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+--- # Allows i2c-speed-test to access a block from the memory chip.
+override:
+  address: 0x51
+  memory-chip: at24c04
+access:
+  i2c-dev: ["/usr/libexec/toh/i2c-speed-test"]
+devices:
+  - address: 0x51

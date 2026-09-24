@@ -10,7 +10,7 @@ use crate::bus::I2cBus;
 use crate::i2cdev::I2cDev;
 use crate::id::{AdcValue, Id, TohId};
 use crate::interrupt::{IntState, Interrupt};
-use crate::power::{self, Power};
+use crate::power::{self, Power, PowerStateRequestError};
 use crate::toh::*;
 use async_trait::async_trait;
 use std::io::{self, Read, Write};
@@ -83,9 +83,8 @@ impl BackCover<state::Detached> {
     /// Requires _root_ access and thus is mainly only good for the daemon.
     pub fn new() -> io::Result<Self> {
         let bus = I2cBus::toh_bus()?;
-        // TODO: Handle also the buffer chip power
         let mut pwr = Power::new()?;
-        pwr.set_power(false)?;
+        pwr.request_state(power::State::Off)?;
         Ok(Self {
             id: Id::new()?,
             int: Interrupt::new()?,
@@ -131,6 +130,9 @@ pub enum IdentificationError {
     /// IO error while reading ADC.
     #[error("IO error while reading ADC: {0}")]
     AdcIo(io::Error),
+    /// Error while setting bus power.
+    #[error("Power request error: {0}")]
+    PowerStateRequest(#[from] PowerStateRequestError),
     /// Cover got removed before identification.
     #[error("Cover disconnected")]
     Disconnected,
@@ -163,11 +165,11 @@ impl BackCover<state::Attached> {
     /// Returns an error if TOH is not present or cannot be identified.
     pub async fn power_up(mut self) -> Result<Variant, IdentificationError> {
         // TODO: Could we have some guard type for power?
-        self.pwr.set_power(true)?;
+        self.pwr.request_state(power::State::Out)?;
         let adc = self.read_adc().await?;
         if self.read_int_state()? != IntState::Low {
             // INT got disconnected => TOH is no longer present.
-            self.pwr.set_power(false)?;
+            self.pwr.request_state(power::State::Off)?;
             return Err(IdentificationError::Disconnected);
         }
 
@@ -199,12 +201,12 @@ impl BackCover<state::Attached> {
             })),
             TohId::NotPresent => {
                 // INT pin claims that there is a cover but no resistor was found.
-                pwr.set_power(false)?;
+                pwr.request_state(power::State::Off)?;
                 Err(IdentificationError::IdResistorNotDetected)
             }
             TohId::Unknown => {
                 // Unsupported type.
-                pwr.set_power(false)?;
+                pwr.request_state(power::State::Off)?;
                 Ok(Variant::Attached(BackCover {
                     id,
                     i2c,
@@ -280,7 +282,7 @@ impl<P: state::State + std::marker::Send> PowerDown for BackCover<P> {
             bus,
             ..
         } = self;
-        pwr.set_power(false)?;
+        pwr.request_state(power::State::Off)?;
         Ok(BackCover {
             id,
             i2c,
@@ -421,6 +423,9 @@ pub enum DetectionError {
     /// Parsing error happened.
     #[error("Parsing error: {0}")]
     Parse(#[from] ParseError),
+    /// Powering bus up or down failed.
+    #[error("Error while setting bus power: {0}")]
+    BusPower(#[from] PowerStateRequestError),
 }
 
 #[async_trait]
@@ -430,7 +435,11 @@ impl Detect for BackCover<state::Present256BBlocks> {
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
         // Check ID pin and INT pin one more time to see that TOH is still there
         if self.id.read()?.is_toh_present() && self.read_int_state()? == IntState::Low {
+            self.pwr.request_state(power::State::Bus)?;
+            sleep(Duration::from_millis(10)).await;
+            // TODO: Power down the bus even in case of errors?
             let content = self.read_chip()?;
+            self.pwr.request_state(power::State::Out)?;
             Ok(Some(Info::parse_from_bytes(&content)?))
         } else {
             Ok(None)

@@ -14,7 +14,7 @@ use std::time::Duration;
 use symbiosis::bus::I2cBus;
 use symbiosis::id::{Id, TohId};
 use symbiosis::interrupt::{IntState, Interrupt};
-use symbiosis::power::Power;
+use symbiosis::power::{self, Power};
 
 /// TOH memory chip writer.
 ///
@@ -70,17 +70,17 @@ fn with_power<F: FnOnce() -> Result<(), Box<dyn std::error::Error>>>(
     f: F,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut power = Power::new()?;
-    power.set_power(true)?;
+    power.request_state(power::State::Bus)?;
     println!("Power enabled");
     sleep(Duration::from_millis(100));
 
     let result = f();
 
     if result.is_ok() {
-        power.set_power(false)?;
+        power.request_state(power::State::Off)?;
         println!("Power disabled");
     } else {
-        let _ = power.set_power(false);
+        let _ = power.request_state(power::State::Off);
     }
 
     result

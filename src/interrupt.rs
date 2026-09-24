@@ -3,11 +3,15 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Interrupt pin handling.
-use crate::back_cover::paths::INT_PATH;
 use std::fs::File;
 use std::io::{self, ErrorKind, Seek};
+use std::path::Path;
 use std::time::Duration;
 use tokio::time::sleep;
+
+// TODO: Drop the old path once the new driver is in a release.
+const INT_PATH: &str = "/sys/devices/platform/yft_pogo_pin/int_state";
+const OLD_INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
 
 const SLEEPING_DURATION: Duration = Duration::from_millis(100);
 
@@ -39,8 +43,13 @@ impl Interrupt {
     ///
     /// This uses the device file directly.
     pub fn new() -> std::io::Result<Self> {
+        let path = Path::new(INT_PATH);
         Ok(Self {
-            file: File::open(INT_PATH)?,
+            file: File::open(if path.exists() {
+                path
+            } else {
+                Path::new(OLD_INT_PATH)
+            })?,
         })
     }
 

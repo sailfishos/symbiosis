@@ -4,11 +4,15 @@
 
 //! Power output pin handling.
 use crate::attr::{access, Attribute};
-use crate::back_cover::paths::PWR_PATH;
 use std::io::{self, ErrorKind};
 use std::marker::Send;
+use std::path::Path;
 
 pub use crate::attr::{Read, ReadWrite};
+
+// TODO: Drop the old path once the new driver is in a release.
+const PWR_PATH: &str = "/sys/devices/platform/yft_pogo_pin/power_request";
+const OLD_PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
 
 /// Power output pin state handling.
 pub struct Power<A: access::Access + Send> {
@@ -20,8 +24,13 @@ impl Power<Read> {
     ///
     /// This uses the device file directly.
     pub fn read_only() -> std::io::Result<Self> {
+        let path = Path::new(PWR_PATH);
         Ok(Self {
-            attr: Attribute::readable(PWR_PATH)?,
+            attr: Attribute::readable(if path.exists() {
+                path
+            } else {
+                Path::new(OLD_PWR_PATH)
+            })?,
         })
     }
 }
@@ -31,9 +40,13 @@ impl Power<ReadWrite> {
     ///
     /// This uses the device file directly.
     pub fn new() -> std::io::Result<Self> {
-        // TODO: Could we lock the file so that other processes cannot change it?
+        let path = Path::new(PWR_PATH);
         Ok(Self {
-            attr: Attribute::read_and_writable(PWR_PATH)?,
+            attr: Attribute::read_and_writable(if path.exists() {
+                path
+            } else {
+                Path::new(OLD_PWR_PATH)
+            })?,
         })
     }
 }

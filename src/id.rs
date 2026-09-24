@@ -5,10 +5,14 @@
 //! ID pin handling, ADC and all that stuff.
 
 use crate::attr::{Attribute, Read};
-use crate::back_cover::paths::ADC_PATH;
 use derive_more::Into;
 use std::io::{self, ErrorKind};
 use std::ops::Sub;
+use std::path::Path;
+
+// TODO: Drop the old path once the new driver is in a release.
+const ADC_PATH: &str = "/sys/devices/platform/yft_pogo_pin/id_voltage_mv";
+const OLD_ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
 
 /// Identified TOH types according to read ADC value.
 pub enum TohId {
@@ -75,8 +79,13 @@ impl Id {
     ///
     /// This uses the device file directly.
     pub fn new() -> std::io::Result<Self> {
+        let path = Path::new(ADC_PATH);
         Ok(Self {
-            attr: Attribute::readable(ADC_PATH)?,
+            attr: Attribute::readable(if path.exists() {
+                path
+            } else {
+                Path::new(OLD_ADC_PATH)
+            })?,
         })
     }
 

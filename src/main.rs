@@ -39,6 +39,7 @@ enum LastErrorKind {
     IdentificationError,
     ChipReadingError,
     ParsingError,
+    PoweringError,
 }
 
 /// Keep count on retries per error kind.
@@ -106,6 +107,7 @@ impl LastError {
         let kind = match error {
             DetectionError::Io(_) => LastErrorKind::ChipReadingError,
             DetectionError::Parse(_) => LastErrorKind::ParsingError,
+            DetectionError::BusPower(_) => LastErrorKind::PoweringError,
         };
         self.update(kind)
     }

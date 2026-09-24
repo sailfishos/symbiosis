@@ -7,7 +7,7 @@
 use super::error::*;
 use crate::{
     i2cdev::I2cDev,
-    power::Power,
+    power::{self, Power},
     toh::{config::Permissions, Info},
 };
 use std::collections::HashMap;
@@ -93,7 +93,8 @@ impl Toh {
         };
         if ok {
             // Enable power for the duration of the loan.
-            Power::new().and_then(|mut pwr| pwr.set_power(true))?;
+            Power::new()
+                .and_then(|mut pwr| pwr.request_state(power::State::Bus).map_err(|e| e.into()))?;
             sleep(Duration::from_millis(100)).await;
             let fd = I2cDev::toh_dev()?.as_fd().try_clone_to_owned()?;
             self.loan = Some(Loan {
@@ -103,9 +104,14 @@ impl Toh {
             });
             Ok(Fd::Owned(fd))
         } else {
-            if power_down {
-                Power::new().and_then(|mut pwr| pwr.set_power(false))?;
-            }
+            Power::new().and_then(|mut pwr| {
+                pwr.request_state(if power_down {
+                    power::State::Off
+                } else {
+                    power::State::Out
+                })
+                .map_err(|e| e.into())
+            })?;
             Err(BorrowError::AccessDenied)
         }
     }
@@ -211,7 +217,8 @@ impl Toh {
 
     /// Return i2c-dev access to the I²C bus.
     ///
-    /// Also powers down the TOH.
+    /// Also powers down the TOH unless power was requested to be left on. Always powers down the
+    /// bus. Kernel may block powering down though.
     ///
     /// Only available to the process that had borrowed the access.
     fn return_i2c_dev_access(
@@ -221,11 +228,16 @@ impl Toh {
         if let Some(loan) = &self.loan {
             if let Some(sender) = header.sender() {
                 if loan.owner == *sender {
-                    let result = if loan.power_down {
-                        Power::new().and_then(|mut pwr| pwr.set_power(false))
-                    } else {
-                        Ok(())
-                    };
+                    let result = Power::new()
+                        .and_then(|mut pwr| {
+                            pwr.request_state(if loan.power_down {
+                                power::State::Off
+                            } else {
+                                power::State::Out
+                            })
+                            .map_err(|e| e.into())
+                        })
+                        .map(|_| ());
                     self.loan = None;
                     return result.map_err(|e| e.into());
                 }

@@ -70,7 +70,8 @@ pub trait Toh {
 
     /// Return i2c-dev access to the I²C bus.
     ///
-    /// Also powers down the TOH.
+    /// Also powers down the TOH unless power was requested to be left on. Always powers down the
+    /// bus. Kernel may block powering down though.
     ///
     /// Only available to the process that had borrowed the access.
     fn return_i2c_dev_access(&mut self) -> Result<(), ReturnError>;

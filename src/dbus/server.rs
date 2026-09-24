@@ -7,7 +7,7 @@
 use super::error::*;
 use crate::{
     i2cdev::I2cDev,
-    power::Power,
+    power::{self, Power},
     toh::{config::Permissions, Info},
 };
 use futures::StreamExt;
@@ -46,18 +46,23 @@ struct Loan {
 impl Loan {
     /// Creates loan and enables power until [`end`](Self::end) is called.
     async fn new(owner: UniqueName<'static>, power_down: bool) -> io::Result<Self> {
-        Power::new().and_then(|mut pwr| pwr.set_power(true))?;
+        Power::new()
+            .and_then(|mut pwr| pwr.request_state(power::State::Bus).map_err(|e| e.into()))?;
         sleep(Duration::from_millis(100)).await;
         Ok(Self { owner, power_down })
     }
 
     /// Ends the loan and turns off power.
     fn end(self) -> io::Result<()> {
-        if self.power_down {
-            Power::new().and_then(|mut pwr| pwr.set_power(false))
-        } else {
-            Ok(())
-        }
+        Power::new().and_then(|mut pwr| {
+            pwr.request_state(if self.power_down {
+                power::State::Off
+            } else {
+                power::State::Out
+            })
+            .map_err(|e| e.into())
+        })?;
+        Ok(())
     }
 }
 
@@ -358,7 +363,8 @@ impl Toh {
 
     /// Return i2c-dev access to the I²C bus.
     ///
-    /// Also powers down the TOH.
+    /// Also powers down the TOH unless power was requested to be left on or blocked by kernel.
+    /// Always powers down the bus unless blocked by kernel.
     ///
     /// Only available to the process that had borrowed the access.
     async fn return_i2c_dev_access(

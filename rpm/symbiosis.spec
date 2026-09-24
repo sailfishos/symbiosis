@@ -101,9 +101,9 @@ export CARGO_OFFLINE="%{_cargo_offline}"
 # Forcing cargo builds to use a single core in order to make it build more
 # reliably. Let's revisit when we upgrade rust. JB#53588
 %ifarch %arm aarch64
-cargo build -j1 $CARGO_OFFLINE --locked --target $SB2_RUST_TARGET_TRIPLE --release --all-targets
+cargo build -j1 $CARGO_OFFLINE --locked --target $SB2_RUST_TARGET_TRIPLE --release --all-targets --features new_kernel_api
 %else
-cargo build -j1 $CARGO_OFFLINE --locked --release --all-targets
+cargo build -j1 $CARGO_OFFLINE --locked --release --all-targets --features new_kernel_api
 %endif
 
 %install

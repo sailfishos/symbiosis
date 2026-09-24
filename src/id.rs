@@ -5,10 +5,14 @@
 //! ID pin handling, ADC and all that stuff.
 
 use crate::attr::{Attribute, Read};
-use crate::back_cover::paths::ADC_PATH;
 use derive_more::Into;
 use std::io::{self, ErrorKind};
 use std::ops::Sub;
+
+#[cfg(feature = "new_kernel_api")]
+const ADC_PATH: &str = "/sys/devices/platform/yft_pogo_pin/id_voltage_mv";
+#[cfg(not(feature = "new_kernel_api"))]
+const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
 
 /// Identified TOH types according to read ADC value.
 #[derive(Debug, Copy, Clone, PartialEq)]

@@ -4,33 +4,14 @@
 
 //! Bus control.
 
+use crate::attr::{Attribute, Write};
 use crate::i2cdev::I2cDev;
-use std::fs::{self, read_dir, File};
-use std::io::{self, Error, ErrorKind, Write};
-use std::path::{Path, PathBuf};
+use std::fs::{self, read_dir};
+use std::io::{self, Error, ErrorKind};
+use std::path::Path;
 
 // TOH I3C/I²C bus has address 11d00000
 const BUS_PATH: &str = "/sys/devices/platform/soc/11d00000.i2c";
-
-/// Small helper to aid writing to sysfs attributes.
-#[derive(Clone, Debug)]
-struct Attribute {
-    path: PathBuf,
-}
-
-impl Attribute {
-    fn write(&self, content: &[u8]) -> io::Result<()> {
-        File::options()
-            .create(false)
-            .write(true)
-            .open(&self.path)
-            .and_then(|mut file| {
-                file.write_all(content)?;
-                file.sync_all()?;
-                Ok(())
-            })
-    }
-}
 
 /// Finds the number of the TOH I²C bus.
 ///
@@ -67,8 +48,8 @@ pub(crate) fn find_toh_i2c_bus() -> io::Result<u8> {
 #[derive(Debug)]
 pub struct I2cBus {
     bus: u8,
-    new_device: Attribute,
-    delete_device: Attribute,
+    new_device: Attribute<Write>,
+    delete_device: Attribute<Write>,
 }
 
 impl I2cBus {
@@ -79,12 +60,8 @@ impl I2cBus {
         let path = Path::new(BUS_PATH).join(format!("i2c-{bus}"));
         Ok(Self {
             bus,
-            new_device: Attribute {
-                path: path.join("new_device"),
-            },
-            delete_device: Attribute {
-                path: path.join("delete_device"),
-            },
+            new_device: Attribute::writable(path.join("new_device"))?,
+            delete_device: Attribute::writable(path.join("delete_device"))?,
         })
     }
 
@@ -97,8 +74,6 @@ impl I2cBus {
     ///
     /// Use the returned [`I2cTarget`] to remove it afterwards.
     pub fn add_target(&mut self, address: u8, name: Option<&str>) -> io::Result<I2cTarget> {
-        // TODO: It would make sense to add some kind of 'Attribute' wrapper for Path to always do
-        // these steps when setting values.
         let name = name.unwrap_or("none");
         log::debug!(
             "Adding target 0x{address:02x} to i2c-{} for {name}",
@@ -175,7 +150,7 @@ impl I2cBus {
 
 /// Target device that has an address on the bus.
 pub struct I2cTarget {
-    delete_device: Attribute,
+    delete_device: Attribute<Write>,
     address: u8,
 }
 

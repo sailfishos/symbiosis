@@ -10,6 +10,7 @@
 //! If you are implementing services for TOH, you'll likely want to use the D-Bus interface and not
 //! include this code.
 
+mod attr;
 pub mod back_cover;
 pub mod bus;
 pub mod dbus;

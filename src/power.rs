@@ -4,11 +4,12 @@
 
 //! Power output pin handling.
 use crate::attr::{access, Attribute};
-use crate::back_cover::paths::PWR_PATH;
 use std::io::{self, ErrorKind};
 use std::marker::Send;
 
 pub use crate::attr::{Read, ReadWrite};
+
+const PWR_PATH: &str = "/sys/devices/platform/yft_pogo_pin/power_request";
 
 /// Power output pin state handling.
 pub struct Power<A: access::Access + Send> {

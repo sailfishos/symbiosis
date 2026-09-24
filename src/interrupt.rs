@@ -3,11 +3,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 //! Interrupt pin handling.
-use crate::back_cover::paths::INT_PATH;
 use std::fs::File;
 use std::io::{self, ErrorKind, Seek};
 use std::time::Duration;
 use tokio::time::sleep;
+
+const INT_PATH: &str = "/sys/devices/platform/yft_pogo_pin/int_state";
 
 const SLEEPING_DURATION: Duration = Duration::from_millis(100);
 

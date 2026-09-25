@@ -2,16 +2,23 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+// TODO: Remove the legacy code paths once the new driver is in a release.
+
 //! Interrupt pin handling.
 use std::fs::File;
 use std::io::{self, ErrorKind, Seek};
 use std::path::Path;
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::{
+    io::{unix::AsyncFd, Interest},
+    time::sleep,
+};
 
 // TODO: Drop the old path once the new driver is in a release.
 const INT_PATH: &str = "/sys/devices/platform/yft_pogo_pin/int_state";
 const OLD_INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
+
+const INTEREST: Interest = Interest::READABLE.add(Interest::PRIORITY);
 
 const SLEEPING_DURATION: Duration = Duration::from_millis(100);
 
@@ -33,9 +40,14 @@ impl IntState {
     }
 }
 
+enum InterruptInternal {
+    Epoll(AsyncFd<File>),
+    Wait(File),
+}
+
 /// Interrupt pin state handling.
 pub struct Interrupt {
-    file: File,
+    internal: InterruptInternal,
 }
 
 impl Interrupt {
@@ -45,19 +57,23 @@ impl Interrupt {
     pub fn new() -> std::io::Result<Self> {
         let path = Path::new(INT_PATH);
         Ok(Self {
-            file: File::open(if path.exists() {
-                path
+            internal: if path.exists() {
+                InterruptInternal::Epoll(AsyncFd::new(File::open(path)?)?)
             } else {
-                Path::new(OLD_INT_PATH)
-            })?,
+                InterruptInternal::Wait(File::open(OLD_INT_PATH)?)
+            },
         })
     }
 
     /// Returns the current int pin state.
     pub fn state(&mut self) -> std::io::Result<IntState> {
-        self.file.rewind()?;
+        let file = match &mut self.internal {
+            InterruptInternal::Epoll(async_fd) => async_fd.get_mut(),
+            InterruptInternal::Wait(file) => file,
+        };
+        file.rewind()?;
         use IntState::*;
-        match io::read_to_string(&self.file)?
+        match io::read_to_string(file)?
             .trim_end()
             .parse::<u8>()
             .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?
@@ -73,12 +89,16 @@ impl Interrupt {
 
     /// Asynchronously watch for state to change to expected on interrupt.
     pub async fn watch(&mut self, expected: IntState) -> std::io::Result<()> {
-        // TODO: Replace with proper implementation.
-        // Currently we just check periodically because there is no implementation to do this
-        // through epoll. Once we have that we can replace this. Or use the other method already in
-        // the kernel when someone writes the user space part for that.
         while self.state()? != expected {
-            sleep(SLEEPING_DURATION).await;
+            match &self.internal {
+                InterruptInternal::Epoll(file) => {
+                    let mut guard = file.ready(INTEREST).await?;
+                    guard.clear_ready();
+                }
+                InterruptInternal::Wait(_) => {
+                    sleep(SLEEPING_DURATION).await;
+                }
+            }
         }
         Ok(())
     }

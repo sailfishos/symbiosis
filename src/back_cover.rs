@@ -376,9 +376,16 @@ impl<P: state::State + std::marker::Send> IsPresent for BackCover<P> {
     }
 }
 
-impl BackCover<state::Present256BBlocks> {
+/// Trait for [`read_chip`](Self::read_chip) method.
+#[async_trait]
+pub trait ReadChip {
     /// Use I²C to read the chip header and payload content into a vector.
-    pub fn read_chip(&mut self) -> io::Result<Vec<u8>> {
+    fn read_chip(&mut self) -> io::Result<Vec<u8>>;
+}
+
+#[async_trait]
+impl ReadChip for BackCover<state::Present256BBlocks> {
+    fn read_chip(&mut self) -> io::Result<Vec<u8>> {
         let mut result = Vec::new();
         let mut buf = [0; 256];
         for address in 0x50..0x60 {
@@ -414,6 +421,20 @@ impl BackCover<state::Present256BBlocks> {
     }
 }
 
+#[async_trait]
+impl ReadChip for BackCover<state::Present64kBBlocks> {
+    fn read_chip(&mut self) -> io::Result<Vec<u8>> {
+        // TODO: Implement reading for Present64kBBlocks too
+        // TODO: Note that writing two bytes to Present256BBlocks chips would rewrite the first byte
+        // on those 8-bit memory chips so this must never be used on those, a great alternative
+        // would be to do this in a way that does not result in overwrites.
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Not implemented yet",
+        ))
+    }
+}
+
 /// Error during TOH detection.
 #[derive(Debug, Error)]
 pub enum DetectionError {
@@ -429,7 +450,10 @@ pub enum DetectionError {
 }
 
 #[async_trait]
-impl Detect for BackCover<state::Present256BBlocks> {
+impl<S: state::State + std::marker::Send> Detect for BackCover<S>
+where
+    BackCover<S>: ReadChip,
+{
     type Error = DetectionError;
 
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
@@ -444,22 +468,6 @@ impl Detect for BackCover<state::Present256BBlocks> {
         } else {
             Ok(None)
         }
-    }
-}
-
-#[async_trait]
-impl Detect for BackCover<state::Present64kBBlocks> {
-    type Error = DetectionError;
-
-    async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
-        // TODO: We need to consider how we make the ID value detection so robust that we don't
-        // accidentally rewrite the first byte on those 8-bit memory chips,
-        // or alternatively we need to do this in a way that does not result in overwrites.
-        // TODO: Implement reading for Present64kBBlocks too
-        Err(DetectionError::Io(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Not implemented yet",
-        )))
     }
 }
 

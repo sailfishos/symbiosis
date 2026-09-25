@@ -2,10 +2,16 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
+// TODO: Remove the legacy code paths once the new driver is in a release.
+
 //! Interrupt pin handling.
 use std::fs::File;
 use std::io::{self, ErrorKind, Seek};
+#[cfg(not(feature = "new_kernel_api"))]
 use std::time::Duration;
+#[cfg(feature = "new_kernel_api")]
+use tokio::io::{unix::AsyncFd, Interest};
+#[cfg(not(feature = "new_kernel_api"))]
 use tokio::time::sleep;
 
 #[cfg(feature = "new_kernel_api")]
@@ -13,6 +19,10 @@ const INT_PATH: &str = "/sys/devices/platform/yft_pogo_pin/int_state";
 #[cfg(not(feature = "new_kernel_api"))]
 const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
 
+#[cfg(feature = "new_kernel_api")]
+const INTEREST: Interest = Interest::READABLE.add(Interest::PRIORITY);
+
+#[cfg(not(feature = "new_kernel_api"))]
 const SLEEPING_DURATION: Duration = Duration::from_millis(100);
 
 /// Interrupt pin state.
@@ -35,6 +45,9 @@ impl IntState {
 
 /// Interrupt pin state handling.
 pub struct Interrupt {
+    #[cfg(feature = "new_kernel_api")]
+    file: AsyncFd<File>,
+    #[cfg(not(feature = "new_kernel_api"))]
     file: File,
 }
 
@@ -44,15 +57,22 @@ impl Interrupt {
     /// This uses the device file directly.
     pub fn new() -> std::io::Result<Self> {
         Ok(Self {
+            #[cfg(feature = "new_kernel_api")]
+            file: AsyncFd::new(File::open(INT_PATH)?)?,
+            #[cfg(not(feature = "new_kernel_api"))]
             file: File::open(INT_PATH)?,
         })
     }
 
     /// Returns the current int pin state.
     pub fn state(&mut self) -> std::io::Result<IntState> {
-        self.file.rewind()?;
+        #[cfg(feature = "new_kernel_api")]
+        let file = self.file.get_mut();
+        #[cfg(not(feature = "new_kernel_api"))]
+        let file = &mut self.file;
+        file.rewind()?;
         use IntState::*;
-        match io::read_to_string(&self.file)?
+        match io::read_to_string(file)?
             .trim_end()
             .parse::<u8>()
             .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?
@@ -68,11 +88,13 @@ impl Interrupt {
 
     /// Asynchronously watch for state to change to expected on interrupt.
     pub async fn watch(&mut self, expected: IntState) -> std::io::Result<()> {
-        // TODO: Replace with proper implementation.
-        // Currently we just check periodically because there is no implementation to do this
-        // through epoll. Once we have that we can replace this. Or use the other method already in
-        // the kernel when someone writes the user space part for that.
         while self.state()? != expected {
+            #[cfg(feature = "new_kernel_api")]
+            {
+                let mut guard = self.file.ready(INTEREST).await?;
+                guard.clear_ready();
+            }
+            #[cfg(not(feature = "new_kernel_api"))]
             sleep(SLEEPING_DURATION).await;
         }
         Ok(())

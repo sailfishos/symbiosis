@@ -30,7 +30,7 @@ pub(crate) mod paths {
 
 mod state {
     pub trait State {}
-    pub trait Present {}
+    pub trait Identifiable {}
 
     /// TOH has not been been detected.
     pub struct Detached {}
@@ -53,8 +53,8 @@ mod state {
     impl State for Present256BBlocks {}
     impl State for Present64kBBlocks {}
 
-    impl Present for Present256BBlocks {}
-    impl Present for Present64kBBlocks {}
+    impl Identifiable for Present256BBlocks {}
+    impl Identifiable for Present64kBBlocks {}
 }
 
 /// TOH implementation that talks via I²C and GPIO.
@@ -479,7 +479,9 @@ pub trait EnableTargetDevices {
     fn enable_target_devices(&mut self, targets: Devices) -> io::Result<()>;
 }
 
-impl<P: state::State + std::marker::Send + state::Present> EnableTargetDevices for BackCover<P> {
+impl<S: state::State + std::marker::Send + state::Identifiable> EnableTargetDevices
+    for BackCover<S>
+{
     fn enable_target_devices(&mut self, targets: Devices) -> io::Result<()> {
         for config::parse::Device {
             address,

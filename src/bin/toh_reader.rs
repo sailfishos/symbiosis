@@ -24,6 +24,9 @@ struct Arguments {
     /// force overwrite
     #[argh(switch, short = 'f', long = "force")]
     overwrite: bool,
+    /// limit chip size
+    #[argh(option, short = 's', long = "size")]
+    chip_size: Option<usize>,
 }
 
 fn read_content(back_cover: Variant) -> std::io::Result<Option<Vec<u8>>> {
@@ -34,11 +37,11 @@ fn read_content(back_cover: Variant) -> std::io::Result<Option<Vec<u8>>> {
             back_cover.power_down()?;
             Ok(Some(content))
         }
-        Variant::With64kBBlocks(back_cover) => {
-            println!("Unsupported TOH");
-            // TODO: Implement
+        Variant::With64kBBlocks(mut back_cover) => {
+            println!("TOH with memory chip (a block up to 64k bytes) detected");
+            let content = back_cover.read_chip()?;
             back_cover.power_down()?;
-            Ok(None)
+            Ok(Some(content))
         }
         Variant::Attached(back_cover) => {
             println!("Unsupported TOH");
@@ -71,7 +74,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }?;
     match back_cover.power_up().await {
         Ok(variant) => {
-            if let Some(content) = read_content(variant)? {
+            if let Some(mut content) = read_content(variant)? {
+                if let Some(size) = args.chip_size {
+                    content.truncate(size);
+                }
                 println!("Read {} bytes from the chip", content.len());
                 file.write_all(content.as_slice())?;
             } else {

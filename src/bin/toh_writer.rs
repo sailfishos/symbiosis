@@ -18,7 +18,7 @@ use symbiosis::power::Power;
 
 /// TOH memory chip writer.
 ///
-/// Uses i2c-dev to write chips. Only supports chips with 256 bytes * 8 blocks.
+/// Uses i2c-dev to write chips.
 #[derive(FromArgs)]
 #[argh(help_triggers("-h", "--help"))]
 struct Arguments {
@@ -51,16 +51,20 @@ fn wait_for_int() -> Result<(), std::io::Error> {
     ))
 }
 
-/// Test ADC for the right type of chip
-fn test_adc_pin() -> Result<(), Box<dyn std::error::Error>> {
+/// Test ADC for the right type of chip and get address size in bytes
+fn get_address_size() -> Result<usize, Box<dyn std::error::Error>> {
     let mut id = Id::new()?;
     let value = id.read()?;
     match value.identify() {
         TohId::R10k => {
             println!("TOH with memory chip (8 blocks of 256 bytes) detected");
-            Ok(())
+            Ok(1)
         }
-        TohId::R15k | TohId::Unknown => Err("Unsupported TOH".into()),
+        TohId::R15k => {
+            println!("TOH with memory chip (a block up to 64k bytes) detected");
+            Ok(2)
+        }
+        TohId::Unknown => Err("Unsupported TOH".into()),
         TohId::NotPresent => Err("Missing TOH".into()),
     }
 }
@@ -99,19 +103,25 @@ fn get_file_size(file: &mut File) -> Result<u64, std::io::Error> {
 fn write_chip(
     bus: &mut I2cBus,
     file: &mut File,
+    address_size: usize,
     page_size: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut i2c = bus.i2c_dev()?;
 
     // Let's check how many bytes we have to read
     let size = get_file_size(file)?;
-    // TODO: Support other types of memory chips
-    if size > 256 * 8 {
-        // The chip has 8 blocks of 256 bytes
+    let (block_size, chip_size) = if address_size == 1 {
+        // The chip has up to 16 blocks of 256 bytes
+        (256, 256 * 16)
+    } else if address_size == 2 {
+        // One block of 65,535 bytes
+        (2_usize.pow(16), 2_u64.pow(16))
+    } else {
+        panic!("Unsupported address size: {address_size}");
+    };
+    if size > chip_size {
         Err(format!(
-            "Too big input file: {} bytes (must be < {} bytes)",
-            size,
-            256 * 8
+            "Too big input file: {size} bytes (must be < {chip_size} bytes)",
         ))?
     }
     let size = size as u32;
@@ -121,24 +131,28 @@ fn write_chip(
     write!(lock, "Writing {} bytes", size)?;
     lock.flush()?;
 
-    // Buffer to contain page and 1 byte for address
-    let mut buf = vec![0u8; page_size + 1];
+    // Buffer to contain page and up to 2 bytes for address
+    let mut buf = vec![0u8; page_size + address_size];
     let mut written: usize = 0;
 
-    for address in 0x50..0x50 + size.div_ceil(256) {
+    for address in 0x50..0x50 + size.div_ceil(block_size as u32) {
         let target = bus.add_target(address.try_into().expect("Fits"), None)?;
         i2c.set_target_address(address)?;
 
-        let start = written - written.rem(256);
-        while written < start + 256 {
+        let start = written - written.rem(block_size);
+        while written < start + block_size {
             let data_address = written - start;
-            let length = (256 - data_address).min(page_size);
-            let length = file.read(&mut buf[1..length + 1])?;
+            let length = (block_size - data_address).min(page_size);
+            let length = file.read(&mut buf[address_size..length + address_size])?;
             if length == 0 {
                 break;
             }
-            buf[0] = data_address as u8;
-            i2c.write_all(&buf[..length + 1])?;
+            if address_size == 1 {
+                buf[0] = data_address as u8;
+            } else {
+                buf[0..=1].copy_from_slice(&(data_address as u16).to_be_bytes());
+            }
+            i2c.write_all(&buf[..length + address_size])?;
             // TODO: This should wait for ack instead
             sleep(Duration::from_millis(length as u64 * 7)); // Typically one byte takes 7 ms
             written += length;
@@ -154,8 +168,20 @@ fn write_chip(
 }
 
 /// Use I²C to verify the chip
-fn verify_chip(bus: &mut I2cBus, file: &mut File) -> Result<(), Box<dyn std::error::Error>> {
+fn verify_chip(
+    bus: &mut I2cBus,
+    file: &mut File,
+    address_size: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut i2c = bus.i2c_dev()?;
+
+    let block_size = if address_size == 1 {
+        256
+    } else if address_size == 2 {
+        2_u64.pow(16)
+    } else {
+        panic!("Unsupported address size: {address_size}");
+    };
 
     // Let's check how many bytes we have to verify
     let size = get_file_size(file)?;
@@ -183,43 +209,47 @@ fn verify_chip(bus: &mut I2cBus, file: &mut File) -> Result<(), Box<dyn std::err
         i2c.set_target_address(address.into())?;
 
         // Set data address to zero
-        i2c.write_all(&[0])?;
+        i2c.write_all(if address_size == 1 { &[0] } else { &[0, 0] })?;
 
-        let length = if size - verified < 256 {
-            // Partial page read
-            file.read(&mut buf1)?
-        } else {
-            // Full page read
-            file.read_exact(&mut buf1)?;
-            buf1.len()
-        };
+        let block_start = (address - 0x50) as u64 * block_size;
 
-        if length == 0 {
-            // Odd but ok
-            break;
+        while (verified - block_start) < block_size {
+            let length = if size - verified < 256 {
+                // Partial page read
+                file.read(&mut buf1)?
+            } else {
+                // Full page read
+                file.read_exact(&mut buf1)?;
+                buf1.len()
+            };
+
+            if length == 0 {
+                // Odd but ok
+                break;
+            }
+
+            i2c.read_exact(&mut buf2[..length])?;
+            if buf1[..length] != buf2[..length] {
+                // Fill partial buffers with zeros just for debug logging
+                buf1[length..].fill(0);
+                buf2[length..].fill(0);
+                // And then print
+                writeln!(lock)?;
+                writeln!(
+                    lock,
+                    "Verification failed at {}..{}!",
+                    verified,
+                    verified + length as u64,
+                )?;
+                writeln!(lock, "Expected ({} bytes): {:?}", length, buf1)?;
+                writeln!(lock, "Got ({} bytes): {:?}", length, buf2)?;
+                Err("Verification failed")?
+            }
+
+            verified += length as u64;
+            write!(lock, ".")?;
+            lock.flush()?;
         }
-
-        i2c.read_exact(&mut buf2[..length])?;
-        if buf1[..length] != buf2[..length] {
-            // Fill partial buffers with zeros just for debug logging
-            buf1[length..].fill(0);
-            buf2[length..].fill(0);
-            // And then print
-            writeln!(lock)?;
-            writeln!(
-                lock,
-                "Verification failed at {}..{}!",
-                verified,
-                verified + length as u64,
-            )?;
-            writeln!(lock, "Expected ({} bytes): {:?}", length, buf1)?;
-            writeln!(lock, "Got ({} bytes): {:?}", length, buf2)?;
-            Err("Verification failed")?
-        }
-
-        verified += length as u64;
-        write!(lock, ".")?;
-        lock.flush()?;
 
         target.remove()?;
     }
@@ -240,11 +270,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: This could also use a yaml file in the same format as create_toh_bin.
     let mut file = File::open(args.input_file)?;
     wait_for_int()?;
-    test_adc_pin()?;
+    let address_size = get_address_size()?;
     with_power(|| {
         let mut i2c = I2cBus::toh_bus()?;
-        write_chip(&mut i2c, &mut file, args.page_size.into())
-            .and_then(|()| verify_chip(&mut i2c, &mut file))
+        write_chip(&mut i2c, &mut file, address_size, args.page_size.into())
+            .and_then(|()| verify_chip(&mut i2c, &mut file, address_size))
     })
 }
 

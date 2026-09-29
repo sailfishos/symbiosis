@@ -422,14 +422,30 @@ impl ReadChip for BackCover<state::Present256BBlocks> {
 #[async_trait]
 impl ReadChip for BackCover<state::Present64kBBlocks> {
     fn read_chip(&mut self) -> io::Result<Vec<u8>> {
-        // TODO: Implement reading for Present64kBBlocks too
-        // TODO: Note that writing two bytes to Present256BBlocks chips would rewrite the first byte
-        // on those 8-bit memory chips so this must never be used on those, a great alternative
-        // would be to do this in a way that does not result in overwrites.
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Not implemented yet",
-        ))
+        // The same drill as with 256B blocks chips.
+        let target = self.bus.add_target(0x50, None)?;
+        // This supports only one block since that is already huge for detection purposes
+        // and the header size does not allow more than that anyway.
+        self.i2c.set_target_address(0x50)?;
+        match self.i2c.write_all(&[0, 0]) {
+            Ok(_) => {
+                let mut result = Vec::with_capacity(2_usize.pow(16));
+                // Read all the blocks in 4k chunks. Note that if the chip is smaller than 64k, this
+                // will read repeated data but that only means we are spending some extra time. In
+                // any case it is impossible to detect that since the chip will keep looping over.
+                let mut buf = [0; 4096];
+                for _ in 0..16 {
+                    self.i2c.read_exact(&mut buf)?;
+                    result.extend(buf);
+                }
+                target.remove()?;
+                Ok(result)
+            }
+            Err(error) => {
+                let _ = target.remove();
+                Err(error)
+            }
+        }
     }
 }
 

@@ -101,6 +101,7 @@ impl Info {
             }
             .into());
         }
+        let mut corrupted_first_byte = false;
         let header::Header {
             magic,
             checksum,
@@ -110,7 +111,12 @@ impl Info {
             payload_size,
         } = header::Header::unpack(content[0..16].try_into().unwrap())?;
         if magic != *b"JTOH" {
-            return Err(WrongMagicError { value: magic }.into());
+            if magic == *b"\0TOH" {
+                // Special case, the first byte has been overwritten by accident.
+                corrupted_first_byte = true;
+            } else {
+                return Err(WrongMagicError { value: magic }.into());
+            }
         }
         if reserved != 0 {
             warn!("Reserved bits are not zero");
@@ -130,6 +136,11 @@ impl Info {
                 expected: checksum,
             }
             .into());
+        }
+
+        if corrupted_first_byte {
+            // All checks were still okay so only the first byte had changed.
+            warn!("Corrupted first byte detected, it has been set to zero!");
         }
 
         let mut payload: BTreeMap<String, ciborium::Value> =

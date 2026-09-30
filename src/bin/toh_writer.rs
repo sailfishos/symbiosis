@@ -64,7 +64,7 @@ fn get_address_size() -> Result<usize, Box<dyn std::error::Error>> {
             println!("TOH with memory chip (a block up to 64k bytes) detected");
             Ok(2)
         }
-        TohId::Unknown => Err("Unsupported TOH".into()),
+        TohId::R6k2 | TohId::Unknown => Err("Unsupported TOH".into()),
         TohId::NotPresent => Err("Missing TOH".into()),
     }
 }

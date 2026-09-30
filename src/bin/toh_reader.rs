@@ -43,6 +43,11 @@ fn read_content(back_cover: Variant) -> std::io::Result<Option<Vec<u8>>> {
             back_cover.power_down()?;
             Ok(Some(content))
         }
+        Variant::WithoutMemoryChip(back_cover) => {
+            println!("TOH without a memory chip");
+            back_cover.power_down()?;
+            Ok(None)
+        }
         Variant::Attached(back_cover) => {
             println!("Unsupported TOH");
             back_cover.power_down()?;

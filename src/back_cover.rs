@@ -48,13 +48,18 @@ mod state {
     /// This is the variant that has a memory chip with large (up to 64 kibibyte) blocks.
     pub struct Present64kBBlocks {}
 
+    /// No memory chip to read.
+    pub struct PresentNoMemoryChip {}
+
     impl State for Detached {}
     impl State for Attached {}
     impl State for Present256BBlocks {}
     impl State for Present64kBBlocks {}
+    impl State for PresentNoMemoryChip {}
 
     impl Identifiable for Present256BBlocks {}
     impl Identifiable for Present64kBBlocks {}
+    impl Identifiable for PresentNoMemoryChip {}
 }
 
 /// TOH implementation that talks via I²C and GPIO.
@@ -75,6 +80,10 @@ pub enum Variant {
     With256BBlocks(BackCover<state::Present256BBlocks>),
     /// TOH with memory chip containing up to 64 kiB blocks.
     With64kBBlocks(BackCover<state::Present64kBBlocks>),
+    /// TOH that does not have a memory chip.
+    ///
+    /// Use this only for development purposes. Identifies as 0:0 and sets leave power on to `true`.
+    WithoutMemoryChip(BackCover<state::PresentNoMemoryChip>),
 }
 
 impl BackCover<state::Detached> {
@@ -181,6 +190,14 @@ impl BackCover<state::Attached> {
         } = self;
         // TODO: Is there a better way to represent this so we don't need to spell out these all?
         match adc.identify() {
+            TohId::R6k2 => Ok(Variant::WithoutMemoryChip(BackCover {
+                id,
+                i2c,
+                int,
+                pwr,
+                bus,
+                _state: PhantomData::<state::PresentNoMemoryChip>,
+            })),
             TohId::R10k => Ok(Variant::With256BBlocks(BackCover {
                 id,
                 i2c,
@@ -472,6 +489,25 @@ where
         if self.id.read()?.is_toh_present() && self.read_int_state()? == IntState::Low {
             let content = self.read_chip()?;
             Ok(Some(Info::parse_from_bytes(&content)?))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+#[async_trait]
+impl Detect for BackCover<state::PresentNoMemoryChip> {
+    type Error = DetectionError;
+
+    async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
+        // Check ID pin and INT pin one more time to see that TOH is still there
+        if self.id.read()?.is_toh_present() && self.read_int_state()? == IntState::Low {
+            Ok(Some(Info {
+                vendor_id: 0,
+                product_id: 0,
+                leave_power_on: Some(true),
+                ..Default::default()
+            }))
         } else {
             Ok(None)
         }

@@ -121,7 +121,7 @@ impl Info {
         if reserved != 0 {
             warn!("Reserved bits are not zero");
         }
-        let end_of_payload: usize = (0x10 + payload_size).into();
+        let end_of_payload = 16 + usize::from(payload_size);
         if content.len() < end_of_payload {
             return Err(MissingDataError {
                 length: content.len(),
@@ -299,5 +299,24 @@ impl Info {
     /// some reason.
     pub fn apply_overrides(&mut self, overrides: Overrides) {
         overrides.apply_overrides(self);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maximum_size_payload() {
+        let mut data = vec![0_u8; 2_usize.pow(16) - 24];
+        for (i, place) in data.iter_mut().enumerate() {
+            *place = i as u8;
+        }
+        let mut info = Info::default();
+        info.extra.insert("64k".to_owned(), ExtraValue::Bytes(data));
+        let bytes = info.into_bytes().unwrap();
+        assert_eq!(bytes.len(), 2_usize.pow(16));
+        let parsed = Info::parse_from_bytes(&bytes).unwrap();
+        assert_eq!(info, parsed);
     }
 }

@@ -45,11 +45,15 @@ mod state {
     /// No memory chip to read.
     pub struct PresentNoMemoryChip {}
 
+    /// TOH has been identified.
+    pub struct Identified {}
+
     impl State for Detached {}
     impl State for Attached {}
     impl State for Present256BBlocks {}
     impl State for Present64kBBlocks {}
     impl State for PresentNoMemoryChip {}
+    impl State for Identified {}
 
     impl Identifiable for Present256BBlocks {}
     impl Identifiable for Present64kBBlocks {}
@@ -306,6 +310,42 @@ impl<P: state::State + std::marker::Send> PowerDown for BackCover<P> {
 
     fn power_down_boxed(self: Box<Self>) -> io::Result<BackCover<state::Detached>> {
         self.power_down()
+    }
+}
+
+/// Trait for [`disable_bus_power`](Self::disable_bus_power) method.
+pub trait DisableBusPower {
+    /// Disable bus power but leave power output enabled.
+    fn disable_bus_power(self) -> io::Result<BackCover<state::Identified>>;
+
+    // NB: Just to workaround some inconveniences in Rust.
+    /// Disable bus power but leave power output enabled.
+    fn disable_bus_power_boxed(self: Box<Self>) -> io::Result<BackCover<state::Identified>>;
+}
+
+impl<S: state::State + std::marker::Send + state::Identifiable> DisableBusPower for BackCover<S> {
+    fn disable_bus_power(self) -> io::Result<BackCover<state::Identified>> {
+        let BackCover {
+            id,
+            i2c,
+            int,
+            mut pwr,
+            bus,
+            ..
+        } = self;
+        pwr.request_state(power::State::Out)?;
+        Ok(BackCover {
+            id,
+            i2c,
+            int,
+            pwr,
+            bus,
+            _state: PhantomData,
+        })
+    }
+
+    fn disable_bus_power_boxed(self: Box<Self>) -> io::Result<BackCover<state::Identified>> {
+        self.disable_bus_power()
     }
 }
 

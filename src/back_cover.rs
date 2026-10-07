@@ -25,6 +25,7 @@ const ACCEPTED_ADC_DIFFERENCE: f64 = 0.005; // 0.5 %
 mod state {
     pub trait State {}
     pub trait Identifiable {}
+    pub trait Powered {}
 
     /// TOH was not detected.
     ///
@@ -49,15 +50,24 @@ mod state {
     /// No memory chip to read.
     pub struct PresentNoMemoryChip {}
 
+    /// TOH has been identified and needs to be power cycled to identfy again.
+    pub struct Identified {}
+
     impl State for Detached {}
     impl State for Attached {}
     impl State for Present256BBlocks {}
     impl State for Present64kBBlocks {}
     impl State for PresentNoMemoryChip {}
+    impl State for Identified {}
 
     impl Identifiable for Present256BBlocks {}
     impl Identifiable for Present64kBBlocks {}
     impl Identifiable for PresentNoMemoryChip {}
+
+    impl Powered for Present256BBlocks {}
+    impl Powered for Present64kBBlocks {}
+    impl Powered for PresentNoMemoryChip {}
+    impl Powered for Identified {}
 }
 
 /// TOH implementation that talks via I²C and GPIO.
@@ -191,6 +201,10 @@ impl id::IdResistor for BackCover<state::Present64kBBlocks> {
 
 impl id::IdResistor for BackCover<state::PresentNoMemoryChip> {
     const ID: TohId = TohId::R6k2;
+}
+
+impl id::IdResistor for BackCover<state::Identified> {
+    const ID: TohId = TohId::Unknown;
 }
 
 impl<S: state::State + std::marker::Send> BackCover<S>
@@ -337,7 +351,7 @@ pub trait PowerDown {
     fn power_down_boxed(self: Box<Self>) -> io::Result<BackCover<state::Attached>>;
 }
 
-impl<S: state::State + std::marker::Send + state::Identifiable> PowerDown for BackCover<S> {
+impl<S: state::State + std::marker::Send + state::Powered> PowerDown for BackCover<S> {
     fn power_down(self) -> io::Result<BackCover<state::Attached>> {
         let BackCover {
             id,
@@ -360,6 +374,42 @@ impl<S: state::State + std::marker::Send + state::Identifiable> PowerDown for Ba
 
     fn power_down_boxed(self: Box<Self>) -> io::Result<BackCover<state::Attached>> {
         self.power_down()
+    }
+}
+
+/// Trait for [`disable_bus_power`](Self::disable_bus_power) method.
+pub trait DisableBusPower {
+    /// Disable bus power but leave power output enabled.
+    fn disable_bus_power(self) -> io::Result<BackCover<state::Identified>>;
+
+    // NB: Just to workaround some inconveniences in Rust.
+    /// Disable bus power but leave power output enabled.
+    fn disable_bus_power_boxed(self: Box<Self>) -> io::Result<BackCover<state::Identified>>;
+}
+
+impl<S: state::State + std::marker::Send + state::Identifiable> DisableBusPower for BackCover<S> {
+    fn disable_bus_power(self) -> io::Result<BackCover<state::Identified>> {
+        let BackCover {
+            id,
+            i2c,
+            int,
+            mut pwr,
+            bus,
+            ..
+        } = self;
+        pwr.request_state(power::State::Out)?;
+        Ok(BackCover {
+            id,
+            i2c,
+            int,
+            pwr,
+            bus,
+            _state: PhantomData,
+        })
+    }
+
+    fn disable_bus_power_boxed(self: Box<Self>) -> io::Result<BackCover<state::Identified>> {
+        self.disable_bus_power()
     }
 }
 
@@ -550,7 +600,6 @@ where
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
         // Check ID pin and INT pin one more time to see that TOH is still there and readable.
         if self.is_expected_id_resistor_present()? && self.read_int_state()? == IntState::Low {
-            // TODO: Power down the bus even in case of errors?
             let content = self.read_chip()?;
             Ok(Some(Info::parse_from_bytes(&content)?))
         } else {

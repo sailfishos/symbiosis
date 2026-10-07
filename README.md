@@ -10,12 +10,14 @@ on the connected TOH.
 
 Use [Sailfish SDK](https://docs.sailfishos.org/Tools/Sailfish_SDK/) to build.
 
-For TOH implementors
+For TOH implementers
 --------------------
 This service is TOH agnostic.
 It does not implement TOH specific features.
 Any TOHs should provide their own configuration that will affect the behaviour on TOH connect.
 More complex features can be implemented with new services and kernel drivers.
+
+Please see [doc directory](doc) for documentation.
 
 Future work
 -----------

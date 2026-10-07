@@ -11,8 +11,8 @@ use std::error::Error;
 use std::time::Duration;
 use symbiosis::{
     back_cover::{
-        BackCover, DetectionError, EnableTargetDevices, IdentificationError, PowerDown, Variant,
-        WaitDisconnect,
+        BackCover, DetectionError, DisableBusPower, EnableTargetDevices, IdentificationError,
+        PowerDown, Variant, WaitDisconnect,
     },
     dbus::server::Toh,
     toh::{Detect, IsPresent},
@@ -31,16 +31,14 @@ const TOH_PATH: &str = "/org/sailfishos/tohd1/toh";
 // TODO: Remove this when we have proper interrupt handling
 const DISCONNECT_WAIT: Duration = Duration::from_secs(10);
 
-trait BackCoverDetect: WaitDisconnect + Detect + PowerDown + EnableTargetDevices {
-    // Rust 1.86.0 gets rid of this
-    fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect>;
+trait BackCoverDetect:
+    WaitDisconnect + Detect + DisableBusPower + PowerDown + EnableTargetDevices
+{
 }
 
-impl<T: WaitDisconnect + Detect + PowerDown + EnableTargetDevices + 'static> BackCoverDetect for T {
-    // Rust 1.86.0 gets rid of this
-    fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect> {
-        self
-    }
+impl<T: WaitDisconnect + Detect + DisableBusPower + PowerDown + EnableTargetDevices + 'static>
+    BackCoverDetect for T
+{
 }
 
 #[derive(FromArgs)]
@@ -174,7 +172,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     // Power down if requested.
                     let back_cover: Box<dyn WaitDisconnect> =
                         if info.leave_power_on.unwrap_or(false) {
-                            back_cover.cast_to_wait_disconnect()
+                            Box::new(back_cover.disable_bus_power_boxed()?)
                         } else {
                             Box::new(back_cover.power_down_boxed()?)
                         };

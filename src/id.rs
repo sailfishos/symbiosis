@@ -12,6 +12,8 @@ use std::ops::Sub;
 
 /// Identified TOH types according to read ADC value.
 pub enum TohId {
+    /// Nominally 6.2kΩ resistor.
+    R6k2,
     /// Nominally 10kΩ resistor.
     R10k,
     /// Nominally 15kΩ resistor.
@@ -40,6 +42,7 @@ impl AdcValue {
     /// Identify the resistor in TOH.
     pub fn identify(&self) -> TohId {
         match self.0 {
+            600..=799 => TohId::R6k2,
             800..=999 => TohId::R10k,
             1000..=1199 => TohId::R15k,
             1750.. => TohId::NotPresent,

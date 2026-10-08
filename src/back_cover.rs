@@ -30,7 +30,7 @@ pub(crate) mod paths {
 
 mod state {
     pub trait State {}
-    pub trait Present {}
+    pub trait Identifiable {}
 
     /// TOH has not been been detected.
     pub struct Detached {}
@@ -48,13 +48,18 @@ mod state {
     /// This is the variant that has a memory chip with large (up to 64 kibibyte) blocks.
     pub struct Present64kBBlocks {}
 
+    /// No memory chip to read.
+    pub struct PresentNoMemoryChip {}
+
     impl State for Detached {}
     impl State for Attached {}
     impl State for Present256BBlocks {}
     impl State for Present64kBBlocks {}
+    impl State for PresentNoMemoryChip {}
 
-    impl Present for Present256BBlocks {}
-    impl Present for Present64kBBlocks {}
+    impl Identifiable for Present256BBlocks {}
+    impl Identifiable for Present64kBBlocks {}
+    impl Identifiable for PresentNoMemoryChip {}
 }
 
 /// TOH implementation that talks via I²C and GPIO.
@@ -75,6 +80,10 @@ pub enum Variant {
     With256BBlocks(BackCover<state::Present256BBlocks>),
     /// TOH with memory chip containing up to 64 kiB blocks.
     With64kBBlocks(BackCover<state::Present64kBBlocks>),
+    /// TOH that does not have a memory chip.
+    ///
+    /// Use this only for development purposes. Identifies as 0:0 and sets leave power on to `true`.
+    WithoutMemoryChip(BackCover<state::PresentNoMemoryChip>),
 }
 
 impl BackCover<state::Detached> {
@@ -181,6 +190,14 @@ impl BackCover<state::Attached> {
         } = self;
         // TODO: Is there a better way to represent this so we don't need to spell out these all?
         match adc.identify() {
+            TohId::R6k2 => Ok(Variant::WithoutMemoryChip(BackCover {
+                id,
+                i2c,
+                int,
+                pwr,
+                bus,
+                _state: PhantomData::<state::PresentNoMemoryChip>,
+            })),
             TohId::R10k => Ok(Variant::With256BBlocks(BackCover {
                 id,
                 i2c,
@@ -374,9 +391,16 @@ impl<P: state::State + std::marker::Send> IsPresent for BackCover<P> {
     }
 }
 
-impl BackCover<state::Present256BBlocks> {
+/// Trait for [`read_chip`](Self::read_chip) method.
+#[async_trait]
+pub trait ReadChip {
     /// Use I²C to read the chip header and payload content into a vector.
-    pub fn read_chip(&mut self) -> io::Result<Vec<u8>> {
+    fn read_chip(&mut self) -> io::Result<Vec<u8>>;
+}
+
+#[async_trait]
+impl ReadChip for BackCover<state::Present256BBlocks> {
+    fn read_chip(&mut self) -> io::Result<Vec<u8>> {
         let mut result = Vec::new();
         let mut buf = [0; 256];
         for address in 0x50..0x60 {
@@ -412,6 +436,36 @@ impl BackCover<state::Present256BBlocks> {
     }
 }
 
+#[async_trait]
+impl ReadChip for BackCover<state::Present64kBBlocks> {
+    fn read_chip(&mut self) -> io::Result<Vec<u8>> {
+        // The same drill as with 256B blocks chips.
+        let target = self.bus.add_target(0x50, None)?;
+        // This supports only one block since that is already huge for detection purposes
+        // and the header size does not allow more than that anyway.
+        self.i2c.set_target_address(0x50)?;
+        match self.i2c.write_all(&[0, 0]) {
+            Ok(_) => {
+                let mut result = Vec::with_capacity(2_usize.pow(16));
+                // Read all the blocks in 4k chunks. Note that if the chip is smaller than 64k, this
+                // will read repeated data but that only means we are spending some extra time. In
+                // any case it is impossible to detect that since the chip will keep looping over.
+                let mut buf = [0; 4096];
+                for _ in 0..16 {
+                    self.i2c.read_exact(&mut buf)?;
+                    result.extend(buf);
+                }
+                target.remove()?;
+                Ok(result)
+            }
+            Err(error) => {
+                let _ = target.remove();
+                Err(error)
+            }
+        }
+    }
+}
+
 /// Error during TOH detection.
 #[derive(Debug, Error)]
 pub enum DetectionError {
@@ -424,7 +478,10 @@ pub enum DetectionError {
 }
 
 #[async_trait]
-impl Detect for BackCover<state::Present256BBlocks> {
+impl<S: state::State + std::marker::Send> Detect for BackCover<S>
+where
+    BackCover<S>: ReadChip,
+{
     type Error = DetectionError;
 
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
@@ -439,18 +496,21 @@ impl Detect for BackCover<state::Present256BBlocks> {
 }
 
 #[async_trait]
-impl Detect for BackCover<state::Present64kBBlocks> {
+impl Detect for BackCover<state::PresentNoMemoryChip> {
     type Error = DetectionError;
 
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
-        // TODO: We need to consider how we make the ID value detection so robust that we don't
-        // accidentally rewrite the first byte on those 8-bit memory chips,
-        // or alternatively we need to do this in a way that does not result in overwrites.
-        // TODO: Implement reading for Present64kBBlocks too
-        Err(DetectionError::Io(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Not implemented yet",
-        )))
+        // Check ID pin and INT pin one more time to see that TOH is still there
+        if self.id.read()?.is_toh_present() && self.read_int_state()? == IntState::Low {
+            Ok(Some(Info {
+                vendor_id: 0,
+                product_id: 0,
+                leave_power_on: Some(true),
+                ..Default::default()
+            }))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -462,7 +522,9 @@ pub trait EnableTargetDevices {
     fn enable_target_devices(&mut self, targets: Devices) -> io::Result<()>;
 }
 
-impl<P: state::State + std::marker::Send + state::Present> EnableTargetDevices for BackCover<P> {
+impl<S: state::State + std::marker::Send + state::Identifiable> EnableTargetDevices
+    for BackCover<S>
+{
     fn enable_target_devices(&mut self, targets: Devices) -> io::Result<()> {
         for config::parse::Device {
             address,

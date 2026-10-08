@@ -116,6 +116,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     debug!("Up to 64k block memory chip detected");
                     Some(Box::new(back_cover))
                 }
+                Ok(Variant::WithoutMemoryChip(back_cover)) => {
+                    debug!("TOH without memory chip detected");
+                    Some(Box::new(back_cover))
+                }
                 Ok(Variant::Attached(back_cover)) => {
                     if !unsupported_message_logged {
                         info!("Unsupported TOH type connected");

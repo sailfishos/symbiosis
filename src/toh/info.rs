@@ -101,6 +101,7 @@ impl Info {
             }
             .into());
         }
+        let mut corrupted_first_byte = false;
         let header::Header {
             magic,
             checksum,
@@ -110,12 +111,17 @@ impl Info {
             payload_size,
         } = header::Header::unpack(content[0..16].try_into().unwrap())?;
         if magic != *b"JTOH" {
-            return Err(WrongMagicError { value: magic }.into());
+            if magic == *b"\0TOH" {
+                // Special case, the first byte has been overwritten by accident.
+                corrupted_first_byte = true;
+            } else {
+                return Err(WrongMagicError { value: magic }.into());
+            }
         }
         if reserved != 0 {
             warn!("Reserved bits are not zero");
         }
-        let end_of_payload: usize = (0x10 + payload_size).into();
+        let end_of_payload = 16 + usize::from(payload_size);
         if content.len() < end_of_payload {
             return Err(MissingDataError {
                 length: content.len(),
@@ -130,6 +136,11 @@ impl Info {
                 expected: checksum,
             }
             .into());
+        }
+
+        if corrupted_first_byte {
+            // All checks were still okay so only the first byte had changed.
+            warn!("Corrupted first byte detected, it has been set to zero!");
         }
 
         let mut payload: BTreeMap<String, ciborium::Value> =
@@ -288,5 +299,24 @@ impl Info {
     /// some reason.
     pub fn apply_overrides(&mut self, overrides: Overrides) {
         overrides.apply_overrides(self);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maximum_size_payload() {
+        let mut data = vec![0_u8; 2_usize.pow(16) - 24];
+        for (i, place) in data.iter_mut().enumerate() {
+            *place = i as u8;
+        }
+        let mut info = Info::default();
+        info.extra.insert("64k".to_owned(), ExtraValue::Bytes(data));
+        let bytes = info.into_bytes().unwrap();
+        assert_eq!(bytes.len(), 2_usize.pow(16));
+        let parsed = Info::parse_from_bytes(&bytes).unwrap();
+        assert_eq!(info, parsed);
     }
 }

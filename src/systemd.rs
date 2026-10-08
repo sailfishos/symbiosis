@@ -52,6 +52,7 @@ mod proxies {
         ) -> Result<OwnedObjectPath>;
         fn start_unit(&self, name: &str, mode: &str) -> Result<OwnedObjectPath>;
         fn stop_unit(&self, name: &str, mode: &str) -> Result<OwnedObjectPath>;
+        fn reset_failed_unit(&self, name: &str) -> Result<()>;
         #[zbus(signal)]
         fn job_removed(
             &self,
@@ -211,10 +212,22 @@ impl<'p> Manager<'p> {
                 }
                 log::info!("Starting transient service {name}");
                 let jobs = self.proxy.receive_job_removed().await?;
-                let job = self
+                let job = match self
                     .proxy
                     .start_transient_unit(&name, "replace", &properties, &Vec::new())
-                    .await?;
+                    .await
+                {
+                    Err(zbus::fdo::Error::ZBus(Error::MethodError(error_name, ..)))
+                        if error_name.as_str() == "org.freedesktop.systemd1.UnitExists" =>
+                    {
+                        // The unit may have failed before, we clear the failure and try again
+                        self.proxy.reset_failed_unit(&name).await?;
+                        self.proxy
+                            .start_transient_unit(&name, "replace", &properties, &Vec::new())
+                            .await
+                    }
+                    other => other,
+                }?;
                 Self::wait_for_job(&name, jobs, &job).await
             }
         }

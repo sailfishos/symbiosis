@@ -203,6 +203,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     // If this returns, the daemon stops and it leaves D-Bus anyway
                     disconnect_result?;
                     object_server.remove::<Toh, _>(TOH_PATH).await?;
+                    // XXX: This should deal with the possible background task of watching bus names
                 }
                 Ok(None) => {
                     // TOH was removed. Let's loop back.

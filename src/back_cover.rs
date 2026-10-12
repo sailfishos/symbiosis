@@ -165,6 +165,56 @@ impl From<AdcReadError> for IdentificationError {
     }
 }
 
+mod id {
+    use crate::id::TohId;
+
+    pub trait IdResistor {
+        const ID: TohId;
+    }
+}
+
+impl id::IdResistor for BackCover<state::Detached> {
+    const ID: TohId = TohId::NotPresent;
+}
+
+impl id::IdResistor for BackCover<state::Attached> {
+    const ID: TohId = TohId::Unknown;
+}
+
+impl id::IdResistor for BackCover<state::Present256BBlocks> {
+    const ID: TohId = TohId::R10k;
+}
+
+impl id::IdResistor for BackCover<state::Present64kBBlocks> {
+    const ID: TohId = TohId::R15k;
+}
+
+impl id::IdResistor for BackCover<state::PresentNoMemoryChip> {
+    const ID: TohId = TohId::R6k2;
+}
+
+impl<S: state::State + std::marker::Send> BackCover<S>
+where
+    BackCover<S>: id::IdResistor,
+{
+    /// Check whether the expected ID resistor is found.
+    ///
+    /// For states that know which resistor should be there, this checks the value to match that.
+    /// If the state should have a resistor but the value is unknown, any resistor is accepted.
+    /// If the state should not have a resistor, there is no expected resistor and this always
+    /// returns false.
+    ///
+    /// This is mostly useful for check if TOH is still present when interrupt pin is high.
+    fn is_expected_id_resistor_present(&mut self) -> io::Result<bool> {
+        use id::IdResistor;
+        Ok(match Self::ID {
+            TohId::R6k2 | TohId::R10k | TohId::R15k => self.id.read()?.identify() == Self::ID,
+            TohId::Unknown => self.id.read()?.is_toh_present(),
+            TohId::NotPresent => false,
+        })
+    }
+}
+
 impl BackCover<state::Attached> {
     /// Power up the connector and return [`BackCover`] in a new state in which the chip can be
     /// read.
@@ -329,14 +379,17 @@ pub trait WaitDisconnect {
 }
 
 #[async_trait]
-impl<P: state::State + std::marker::Send> WaitDisconnect for BackCover<P> {
+impl<S: state::State + std::marker::Send> WaitDisconnect for BackCover<S>
+where
+    BackCover<S>: id::IdResistor,
+{
     async fn wait_disconnect(mut self) -> io::Result<BackCover<state::Detached>> {
         loop {
             self.int.watch(IntState::High).await?;
             // Check that the cover was actually removed by reading ADC one more time.
             // If ID pin happens to get disconnected only after this check, we will anyway loop back
             // over, read INT pin one more time and check ID pin again.
-            if !self.id.read()?.is_toh_present() {
+            if !self.is_expected_id_resistor_present()? {
                 // TOH is disconnected
                 break;
             } else {
@@ -378,22 +431,28 @@ impl<P: state::State + std::marker::Send> IsPowered for BackCover<P> {
 }
 
 #[async_trait]
-impl<P: state::State + std::marker::Send> IsPresent for BackCover<P> {
-    type Error = AdcReadError;
+impl<S: state::State + std::marker::Send> IsPresent for BackCover<S>
+where
+    BackCover<S>: id::IdResistor,
+{
+    type Error = io::Error;
 
     async fn is_present(&mut self) -> Result<bool, Self::Error> {
-        if self.read_int_state()? == IntState::Low {
-            // This checks INT state again to ensure it remained low after reading ADC
-            Ok(self.read_adc().await?.is_toh_present() && self.read_int_state()? == IntState::Low)
+        use id::IdResistor;
+        if matches!(Self::ID, TohId::Unknown) {
+            // BackCover does not have a known resistor value => only way to know if it is present
+            // is INT state.
+            Ok(self.read_int_state()? == IntState::Low)
         } else {
-            Ok(false)
+            // Otherwise check ID resistor.
+            self.is_expected_id_resistor_present()
         }
     }
 }
 
 /// Trait for [`read_chip`](Self::read_chip) method.
 #[async_trait]
-pub trait ReadChip {
+pub trait ReadChip: id::IdResistor {
     /// Use I²C to read the chip header and payload content into a vector.
     fn read_chip(&mut self) -> io::Result<Vec<u8>>;
 }
@@ -486,7 +545,7 @@ where
 
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
         // Check ID pin and INT pin one more time to see that TOH is still there
-        if self.id.read()?.is_toh_present() && self.read_int_state()? == IntState::Low {
+        if self.is_expected_id_resistor_present()? && self.read_int_state()? == IntState::Low {
             let content = self.read_chip()?;
             Ok(Some(Info::parse_from_bytes(&content)?))
         } else {
@@ -501,7 +560,7 @@ impl Detect for BackCover<state::PresentNoMemoryChip> {
 
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
         // Check ID pin and INT pin one more time to see that TOH is still there
-        if self.id.read()?.is_toh_present() && self.read_int_state()? == IntState::Low {
+        if self.is_expected_id_resistor_present()? && self.read_int_state()? == IntState::Low {
             Ok(Some(Info {
                 vendor_id: 0,
                 product_id: 0,

@@ -249,7 +249,9 @@ impl Toh {
             Ok(Fd::Owned(fd))
         } else {
             if let Some(loan) = previous_loan {
-                loan.end()?;
+                if let Err(error) = loan.end() {
+                    log::warn!("Failed to turn off power after loan: {error}");
+                }
             }
             Err(BorrowError::AccessDenied)
         }

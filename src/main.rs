@@ -28,8 +28,88 @@ const SERVICE_NAME: &str = "org.sailfishos.tohd1";
 const SERVICE_PATH: &str = "/org/sailfishos/tohd1";
 const TOH_PATH: &str = "/org/sailfishos/tohd1/toh";
 
-// TODO: Remove this when we have proper interrupt handling
-const DISCONNECT_WAIT: Duration = Duration::from_secs(10);
+/// Error kinds on TOH detection.
+#[derive(Default, PartialEq)]
+enum LastErrorKind {
+    #[default]
+    NoError,
+    UnsupportedToh,
+    BadlySeated,
+    MissingIdResistor,
+    IdentificationError,
+    ChipReadingError,
+    ParsingError,
+}
+
+/// Keep count on retries per error kind.
+#[derive(Default)]
+struct LastError {
+    /// Number of reattempts on the same error.
+    count: u8,
+    /// Last seen error kind.
+    kind: LastErrorKind,
+}
+
+impl LastError {
+    fn at_limit(&self) -> bool {
+        let retry_limit = match self.kind {
+            LastErrorKind::NoError => {
+                // NoError is never at limit.
+                return false;
+            }
+            // Give this a retry chance.
+            LastErrorKind::UnsupportedToh => 1,
+            // Here we should wait that the user manages to attach TOH properly.
+            LastErrorKind::BadlySeated => 99,
+            // Either TOH is broken or ID pin does not touch yet.
+            LastErrorKind::MissingIdResistor => 49,
+            // Otherwise 5 attempts seems like a reasonable number.
+            _ => 4,
+        };
+        self.count >= retry_limit
+    }
+
+    fn reset(&mut self) {
+        self.update(LastErrorKind::NoError);
+    }
+
+    /// Update last error kind and return whether it changed.
+    fn update(&mut self, kind: LastErrorKind) -> bool {
+        if self.kind == kind {
+            self.count = self.count.saturating_add(1);
+            false
+        } else {
+            // If error kind changes, reset count as clearly something is happening.
+            self.count = 0;
+            self.kind = kind;
+            true
+        }
+    }
+
+    fn update_from_identification_error(&mut self, error: &IdentificationError) -> bool {
+        let kind = match error {
+            // User removed the back cover. Nothing to see here.
+            IdentificationError::Disconnected => LastErrorKind::NoError,
+            // User is probably still attaching TOH, so let's try again in a moment.
+            IdentificationError::BadlySeated => LastErrorKind::BadlySeated,
+            // This could be either that TOH is not yet pressed in fully, or it is defective and ID
+            // resistor is not connected.
+            IdentificationError::IdResistorNotDetected => LastErrorKind::MissingIdResistor,
+            _ => LastErrorKind::IdentificationError,
+        };
+        self.update(kind)
+    }
+
+    fn update_from_detection_error(&mut self, error: &DetectionError) -> bool {
+        // These could both happen also when TOH is not that well seated but we don't expect them to
+        // alternate when TOH is broken.
+        let kind = match error {
+            DetectionError::Io(_) => LastErrorKind::ChipReadingError,
+            DetectionError::Parse(_) => LastErrorKind::ParsingError,
+        };
+        self.update(kind)
+    }
+}
 
 trait BackCoverDetect: WaitDisconnect + Detect + PowerDown + EnableTargetDevices {
     // Rust 1.86.0 gets rid of this
@@ -87,12 +167,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             error
         })?;
     debug!("Connected to D-Bus");
-    let mut unsupported_message_logged = false;
 
     // After start, check if the cover is already present so we can skip some of the
     // services from starting. Useful e.g. to avoid changing ambience on boot or service
     // restart.
     let mut toh_already_present = true;
+    // Keep tab of some types of errors.
+    let mut last_error = LastError::default();
 
     loop {
         let mut back_cover = BackCover::new()?;
@@ -120,33 +201,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     debug!("TOH without memory chip detected");
                     Some(Box::new(back_cover))
                 }
-                Ok(Variant::Attached(back_cover)) => {
-                    if !unsupported_message_logged {
+                Ok(Variant::Attached(_)) => {
+                    if last_error.update(LastErrorKind::UnsupportedToh) {
                         info!("Unsupported TOH type connected");
-                        unsupported_message_logged = true;
                     }
-                    // Since this is fairly unlikely, we retry detection after some time even if the
-                    // TOH has not been disconnected.
-                    timeout(DISCONNECT_WAIT, back_cover.wait_disconnect())
-                        .await
-                        .ok()
-                        .transpose()?;
                     None
                 }
                 Err(error) => {
-                    warn!("TOH power up failed: {error}");
-                    let delay = if matches!(
-                        error,
-                        IdentificationError::BadlySeated
-                            | IdentificationError::IdResistorNotDetected
-                    ) {
-                        // Use a shorter delay if user is still connecting TOH
-                        Duration::from_secs(1)
+                    if last_error.update_from_identification_error(&error) {
+                        warn!("TOH power up failed: {error}");
                     } else {
-                        // Otherwise let's sleep for a good while
-                        DISCONNECT_WAIT
-                    };
-                    sleep(delay).await;
+                        debug!("Repeated identification error: {error}");
+                    }
                     None
                 }
             };
@@ -155,6 +221,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             sleep(Duration::from_millis(100)).await;
             match back_cover.detect().await {
                 Ok(Some(mut info)) => {
+                    // Detection succeeded => reset retry count.
+                    last_error.reset();
+
                     let (units, permissions) = match info.read_configs() {
                         Err(error) => {
                             warn!("Failed to read config: {error}");
@@ -205,17 +274,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     object_server.remove::<Toh, _>(TOH_PATH).await?;
                 }
                 Ok(None) => {
-                    // TOH was removed. Let's loop back.
+                    // TOH was removed. Let's reset retry count and loop back.
                     info!("TOH was disconnected while detecting it");
+                    last_error.reset();
                 }
                 Err(error) => {
-                    // Reasons why this might happen include that TOH was not yet properly
-                    // connected, or the type might have been misdetected, so it is a good idea to
-                    // try again after a while.
-                    warn!("Detecting TOH failed: {error:?}");
+                    if last_error.update_from_detection_error(&error) {
+                        warn!("Detecting TOH failed: {error:?}");
+                    } else {
+                        debug!("Repeated detection error: {error:?}");
+                    }
                 }
             }
-            sleep(Duration::from_secs(1)).await;
         };
+        // Looping around, turn off power and do some checks.
+        let back_cover = BackCover::new()?;
+        if last_error.at_limit() {
+            // Retry count reached, wait that TOH is disconnected before continuing.
+            warn!("Retry count reached, waiting for TOH to be disconnected");
+            last_error.reset();
+            back_cover.wait_disconnect().await?;
+            debug!("TOH disconnected, continuing");
+        } else {
+            // In case there was an error sleep for a second or until TOH is disconnected.
+            timeout(Duration::from_secs(1), back_cover.wait_disconnect())
+                .await
+                .ok()
+                .transpose()?;
+        }
     }
 }

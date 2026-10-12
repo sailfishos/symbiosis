@@ -9,7 +9,7 @@
 %endif
 
 Name:           symbiosis
-Version:        0.3.1
+Version:        0.4.0
 Release:        0
 Summary:        Sailfish next generation TOHD
 

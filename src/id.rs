@@ -11,6 +11,7 @@ use std::io::{self, ErrorKind, Seek};
 use std::ops::Sub;
 
 /// Identified TOH types according to read ADC value.
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TohId {
     /// Nominally 6.2kΩ resistor.
     R6k2,

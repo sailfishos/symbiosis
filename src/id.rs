@@ -35,7 +35,6 @@ impl AdcValue {
     ///
     /// Note that implementations should also observe interrupt pin.
     pub fn is_toh_present(&self) -> bool {
-        // TODO: Check the limits, we aim for 0 - 1.7 volts.
         (0..1750).contains(&self.0)
     }
 

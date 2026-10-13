@@ -266,7 +266,6 @@ fn verify_chip(
 #[cfg(target_os = "linux")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Arguments = argh::from_env();
-    // TODO: Modprobe i2c-dev if it is not there yet
     // TODO: This could also use a yaml file in the same format as create_toh_bin.
     let mut file = File::open(args.input_file)?;
     wait_for_int()?;

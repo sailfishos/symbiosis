@@ -12,6 +12,7 @@ use crate::systemd::Manager;
 use crate::toh::Info;
 use std::collections::HashSet;
 use std::fs::read_dir;
+use std::io::ErrorKind;
 use std::marker::Send;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -96,14 +97,11 @@ impl Configs {
         let mut path = PathBuf::from(paths::CONFIG_PATH);
         path.push(format!("{:04x}", vendor_id));
         path.push(format!("{:04x}", product_id));
-        if !std::fs::metadata(&path)
-            .as_ref()
-            .is_ok_and(std::fs::Metadata::is_dir)
-        {
-            return Ok(None);
-        }
-        // TODO: The directory could have been deleted between the check and this
-        let mut paths: Vec<PathBuf> = read_dir(&path)?
+        let entries = match read_dir(&path) {
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            other => other,
+        }?;
+        let mut paths: Vec<PathBuf> = entries
             .filter_map(|entry| match entry {
                 Ok(entry) => {
                     let path = entry.path();

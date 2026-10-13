@@ -50,7 +50,6 @@ impl From<ciborium::Value> for ParseError {
     }
 }
 
-// TODO: How about chipless TOHs? Perhaps we need an enum
 /// TOH memory chip content.
 #[derive(Debug, Default, Deserialize, PartialEq)]
 pub struct Info {

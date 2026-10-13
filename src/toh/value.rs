@@ -159,7 +159,6 @@ impl<'a> TryFrom<&zvariant::Value<'a>> for ExtraValue {
 pub struct NonConvertableValue<'v>(&'v ExtraValue);
 
 impl ExtraValue {
-    // TODO: It would be nice if library users didn't have to depend on zvariant unnecessarily.
     /// Converts to [`enum@zvariant::Value`] but discards inner values that could not be converted.
     pub fn try_into_dbus_lossy(&self) -> Result<zvariant::Value<'_>, NonConvertableValue<'_>> {
         use zvariant::Value;

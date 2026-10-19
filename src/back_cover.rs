@@ -364,6 +364,7 @@ impl<P: state::State + std::marker::Send> PowerDown for BackCover<P> {
 }
 
 /// Trait for [`wait_disconnect`](Self::wait_disconnect) method.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait WaitDisconnect {
     /// Wait for disconnection of TOH.

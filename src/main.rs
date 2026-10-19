@@ -196,13 +196,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         (disconnect_future.await, None)
                     };
 
-                    // Stop units if something goes wrong before returning result
+                    // Stop units if something goes wrong before returning results.
                     if let Some(units) = units {
                         units.stop_units().await;
                     }
-                    // If this returns, the daemon stops and it leaves D-Bus anyway
+
+                    let toh = object_server
+                        .interface::<_, Toh>(TOH_PATH)
+                        .await
+                        .expect("The path exists.");
+
+                    let result = object_server.remove::<Toh, _>(TOH_PATH).await;
+
+                    // End the borrow and abort watcher if there is any.
+                    toh.get_mut().await.abort_watcher().await;
+
+                    // Now that the TOH is handled, let's return errors if there are any.
                     disconnect_result?;
-                    object_server.remove::<Toh, _>(TOH_PATH).await?;
+                    result?;
                 }
                 Ok(None) => {
                     // TOH was removed. Let's loop back.

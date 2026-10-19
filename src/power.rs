@@ -46,7 +46,6 @@ impl Power<ReadWrite> {
     ///
     /// This uses the device file directly.
     pub fn new() -> std::io::Result<Self> {
-        // TODO: Could we lock the file so that other processes cannot change it?
         Ok(Self {
             file: File::options().read(true).write(true).open(PWR_PATH)?,
             _access: PhantomData,

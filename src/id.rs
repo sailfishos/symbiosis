@@ -11,6 +11,7 @@ use std::io::{self, ErrorKind, Seek};
 use std::ops::Sub;
 
 /// Identified TOH types according to read ADC value.
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TohId {
     /// Nominally 6.2kΩ resistor.
     R6k2,
@@ -35,7 +36,6 @@ impl AdcValue {
     ///
     /// Note that implementations should also observe interrupt pin.
     pub fn is_toh_present(&self) -> bool {
-        // TODO: Check the limits, we aim for 0 - 1.7 volts.
         (0..1750).contains(&self.0)
     }
 

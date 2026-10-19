@@ -8,6 +8,7 @@ use super::info::*;
 use async_trait::async_trait;
 
 /// Trait for [`is_powered`](Self::is_powered) method.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait IsPowered {
     type Error;
@@ -17,6 +18,7 @@ pub trait IsPowered {
 }
 
 /// Trait for [`is_present`](Self::is_present) method.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait IsPresent {
     type Error;
@@ -26,6 +28,7 @@ pub trait IsPresent {
 }
 
 /// Trait for [`detect`](Self::detect) method.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait Detect {
     type Error;

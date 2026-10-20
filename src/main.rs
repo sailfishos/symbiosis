@@ -11,8 +11,8 @@ use std::error::Error;
 use std::time::Duration;
 use symbiosis::{
     back_cover::{
-        BackCover, DetectionError, EnableTargetDevices, IdentificationError, PowerDown, Variant,
-        WaitDisconnect,
+        BackCover, DetectionError, EnableTargetDevices, IdentificationError, PowerDown, Subscribe,
+        Variant, WaitDisconnect,
     },
     dbus::server::Toh,
     toh::{Detect, IsPresent},
@@ -31,12 +31,14 @@ const TOH_PATH: &str = "/org/sailfishos/tohd1/toh";
 // TODO: Remove this when we have proper interrupt handling
 const DISCONNECT_WAIT: Duration = Duration::from_secs(10);
 
-trait BackCoverDetect: WaitDisconnect + Detect + PowerDown + EnableTargetDevices {
+trait BackCoverDetect: WaitDisconnect + Detect + PowerDown + EnableTargetDevices + Subscribe {
     // Rust 1.86.0 gets rid of this
     fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect>;
 }
 
-impl<T: WaitDisconnect + Detect + PowerDown + EnableTargetDevices + 'static> BackCoverDetect for T {
+impl<T: WaitDisconnect + Detect + PowerDown + EnableTargetDevices + Subscribe + 'static>
+    BackCoverDetect for T
+{
     // Rust 1.86.0 gets rid of this
     fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect> {
         self
@@ -171,6 +173,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                     .unzip();
 
+                    let receiver = back_cover.subscribe();
+
                     // Power down if requested.
                     let back_cover: Box<dyn WaitDisconnect> =
                         if info.leave_power_on.unwrap_or(false) {
@@ -180,7 +184,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         };
 
                     // Publish TOH on D-Bus before starting services
-                    let toh = Toh::new(info, permissions.unwrap_or_default());
+                    let toh = Toh::new(info, permissions.unwrap_or_default(), receiver);
                     object_server.at(TOH_PATH, toh).await?;
 
                     // Wait for disconnect already while starting units

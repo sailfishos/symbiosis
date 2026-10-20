@@ -8,10 +8,11 @@ use super::borrow::*;
 use crate::{
     dbus::error::*,
     i2cdev::I2cDev,
-    toh::{config::Permissions, Info},
+    toh::{config::Permissions, Info, Interrupt},
 };
 use std::collections::HashMap;
 use std::os::fd::AsFd;
+use tokio::sync::watch::Receiver;
 use zbus::{fdo::DBusProxy, interface, message::Header, Connection};
 use zvariant::{Fd, Optional, OwnedValue};
 
@@ -23,15 +24,17 @@ use zvariant::{Fd, Optional, OwnedValue};
 pub struct Toh {
     info: Info,
     permissions: Permissions,
+    receiver: Receiver<Interrupt>,
     watcher: Option<LoanWatcher>,
 }
 
 impl Toh {
     /// Create new representation from TOH info.
-    pub fn new(info: Info, permissions: Permissions) -> Self {
+    pub fn new(info: Info, permissions: Permissions, receiver: Receiver<Interrupt>) -> Self {
         Self {
             info,
             permissions,
+            receiver: receiver,
             watcher: None,
         }
     }
@@ -228,5 +231,16 @@ impl Toh {
             }
         }
         Err(ReturnError::NoLoan)
+    }
+
+    /// Subscribe to interrupts.
+    ///
+    /// This returns a socket file descriptor that only receives empty packets on interrupts for
+    /// this TOH. The sending end of the socket is closed when TOH is disconnected.
+    ///
+    /// Does not affect device power. This can be called multiple times by different callers.
+    fn subscribe_interrupts(&mut self) -> Fd<'static> {
+        let _ = &self.receiver;
+        todo!()
     }
 }

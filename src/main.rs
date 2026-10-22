@@ -11,11 +11,11 @@ use std::error::Error;
 use std::time::Duration;
 use symbiosis::{
     back_cover::{
-        BackCover, DetectionError, EnableTargetDevices, IdentificationError, PowerDown, Subscribe,
-        Variant, WaitDisconnect,
+        BackCover, DetectionError, EnableTargetDevices, IdentificationError, Infallible,
+        InterruptReceiver, PowerDown, Variant, WaitDisconnect,
     },
     dbus::server::Toh,
-    toh::{Detect, IsPresent},
+    toh::{Detect, IsPresent, SubscribeInterrupt},
 };
 use systemd_journal_logger::JournalLog;
 use tokio::{
@@ -31,13 +31,25 @@ const TOH_PATH: &str = "/org/sailfishos/tohd1/toh";
 // TODO: Remove this when we have proper interrupt handling
 const DISCONNECT_WAIT: Duration = Duration::from_secs(10);
 
-trait BackCoverDetect: WaitDisconnect + Detect + PowerDown + EnableTargetDevices + Subscribe {
+trait BackCoverDetect:
+    WaitDisconnect
+    + Detect<Error = DetectionError>
+    + PowerDown
+    + EnableTargetDevices
+    + SubscribeInterrupt<Error = Infallible, Receiver = InterruptReceiver>
+{
     // Rust 1.86.0 gets rid of this
     fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect>;
 }
 
-impl<T: WaitDisconnect + Detect + PowerDown + EnableTargetDevices + Subscribe + 'static>
-    BackCoverDetect for T
+impl<
+        T: WaitDisconnect
+            + Detect<Error = DetectionError>
+            + PowerDown
+            + EnableTargetDevices
+            + SubscribeInterrupt<Error = Infallible, Receiver = InterruptReceiver>
+            + 'static,
+    > BackCoverDetect for T
 {
     // Rust 1.86.0 gets rid of this
     fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect> {
@@ -108,50 +120,48 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         let back_cover = back_cover.wait_connect().await?;
         debug!("TOH connected");
-        let detect: Option<Box<dyn BackCoverDetect<Error = DetectionError>>> =
-            match back_cover.power_up().await {
-                Ok(Variant::With256BBlocks(back_cover)) => {
-                    debug!("Up to 256B block memory chip detected");
-                    Some(Box::new(back_cover))
+        let detect: Option<Box<dyn BackCoverDetect>> = match back_cover.power_up().await {
+            Ok(Variant::With256BBlocks(back_cover)) => {
+                debug!("Up to 256B block memory chip detected");
+                Some(Box::new(back_cover))
+            }
+            Ok(Variant::With64kBBlocks(back_cover)) => {
+                debug!("Up to 64k block memory chip detected");
+                Some(Box::new(back_cover))
+            }
+            Ok(Variant::WithoutMemoryChip(back_cover)) => {
+                debug!("TOH without memory chip detected");
+                Some(Box::new(back_cover))
+            }
+            Ok(Variant::Attached(back_cover)) => {
+                if !unsupported_message_logged {
+                    info!("Unsupported TOH type connected");
+                    unsupported_message_logged = true;
                 }
-                Ok(Variant::With64kBBlocks(back_cover)) => {
-                    debug!("Up to 64k block memory chip detected");
-                    Some(Box::new(back_cover))
-                }
-                Ok(Variant::WithoutMemoryChip(back_cover)) => {
-                    debug!("TOH without memory chip detected");
-                    Some(Box::new(back_cover))
-                }
-                Ok(Variant::Attached(back_cover)) => {
-                    if !unsupported_message_logged {
-                        info!("Unsupported TOH type connected");
-                        unsupported_message_logged = true;
-                    }
-                    // Since this is fairly unlikely, we retry detection after some time even if the
-                    // TOH has not been disconnected.
-                    timeout(DISCONNECT_WAIT, back_cover.wait_disconnect())
-                        .await
-                        .ok()
-                        .transpose()?;
-                    None
-                }
-                Err(error) => {
-                    warn!("TOH power up failed: {error}");
-                    let delay = if matches!(
-                        error,
-                        IdentificationError::BadlySeated
-                            | IdentificationError::IdResistorNotDetected
-                    ) {
-                        // Use a shorter delay if user is still connecting TOH
-                        Duration::from_secs(1)
-                    } else {
-                        // Otherwise let's sleep for a good while
-                        DISCONNECT_WAIT
-                    };
-                    sleep(delay).await;
-                    None
-                }
-            };
+                // Since this is fairly unlikely, we retry detection after some time even if the
+                // TOH has not been disconnected.
+                timeout(DISCONNECT_WAIT, back_cover.wait_disconnect())
+                    .await
+                    .ok()
+                    .transpose()?;
+                None
+            }
+            Err(error) => {
+                warn!("TOH power up failed: {error}");
+                let delay = if matches!(
+                    error,
+                    IdentificationError::BadlySeated | IdentificationError::IdResistorNotDetected
+                ) {
+                    // Use a shorter delay if user is still connecting TOH
+                    Duration::from_secs(1)
+                } else {
+                    // Otherwise let's sleep for a good while
+                    DISCONNECT_WAIT
+                };
+                sleep(delay).await;
+                None
+            }
+        };
         if let Some(mut back_cover) = detect {
             // Wait a bit after powering up so the chip has a chance to be ready
             sleep(Duration::from_millis(100)).await;
@@ -173,7 +183,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                     .unzip();
 
-                    let receiver = back_cover.subscribe();
+                    let receiver = back_cover.subscribe_interrupt().await.expect("Infallible");
 
                     // Power down if requested.
                     let back_cover: Box<dyn WaitDisconnect> =

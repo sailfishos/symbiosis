@@ -39,3 +39,28 @@ pub trait Detect {
     /// may be populated from device or cache.
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error>;
 }
+
+/// Interrupt.
+#[derive(Debug)]
+pub struct Interrupt;
+
+/// Trait for [`wait_interrupt`](Self::wait_interrupt) method.
+#[allow(clippy::double_must_use)]
+#[async_trait]
+pub trait WaitInterrupt {
+    type Error;
+
+    /// Wait for interrupt.
+    async fn wait_interrupt(&mut self) -> Result<Interrupt, Self::Error>;
+}
+
+/// Trait for [`subscribe_interrupt`](Self::subscribe_interrupt) method.
+#[allow(clippy::double_must_use)]
+#[async_trait]
+pub trait SubscribeInterrupt {
+    type Receiver;
+    type Error;
+
+    /// Subscribe to interrupts.
+    async fn subscribe_interrupt(&mut self) -> Result<Self::Receiver, Self::Error>;
+}

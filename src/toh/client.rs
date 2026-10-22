@@ -15,6 +15,8 @@ use crate::{
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use std::collections::BTreeMap;
+use std::os::fd::OwnedFd;
+use std::os::unix::net::UnixStream;
 use thiserror::Error;
 use zbus::{
     fdo::{Error as DBusError, PeerProxy},
@@ -140,6 +142,11 @@ impl<'proxy> Toh<'proxy> {
                         >>()?,
             },
         )
+    }
+
+    async fn fetch_interrupt_subscription(&mut self) -> Result<UnixStream, DBusError> {
+        let fd = self.toh.subscribe_interrupts().await?;
+        Ok(UnixStream::from(OwnedFd::from(fd)))
     }
 }
 

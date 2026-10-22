@@ -563,16 +563,37 @@ impl<S: state::State + std::marker::Send + state::Identifiable> EnableTargetDevi
     }
 }
 
-/// Trait for [`subscribe`](Self::subscribe) method.
-pub trait Subscribe {
-    /// Subscribe to interrupts.
-    ///
-    /// Follow [`Receiver::changed`](watch::Receiver::changed) for new interrupts.
-    fn subscribe(&self) -> watch::Receiver<Interrupt>;
+/// Error that never happens.
+#[derive(Debug, Error)]
+pub enum Infallible {}
+
+/// Receiver for interrupts.
+///
+/// Implements [`WaitInterrupt`].
+#[derive(Debug)]
+pub struct InterruptReceiver {
+    receiver: watch::Receiver<Interrupt>,
 }
 
-impl<S: state::State + std::marker::Send + state::Identifiable> Subscribe for BackCover<S> {
-    fn subscribe(&self) -> watch::Receiver<Interrupt> {
-        self.channel.subscribe()
+#[async_trait]
+impl<S: state::State + std::marker::Send + state::Identifiable> SubscribeInterrupt
+    for BackCover<S>
+{
+    type Receiver = InterruptReceiver;
+    type Error = Infallible;
+
+    async fn subscribe_interrupt(&mut self) -> Result<Self::Receiver, Self::Error> {
+        Ok(InterruptReceiver {
+            receiver: self.channel.subscribe(),
+        })
+    }
+}
+
+#[async_trait]
+impl WaitInterrupt for InterruptReceiver {
+    type Error = watch::error::RecvError;
+
+    async fn wait_interrupt(&mut self) -> Result<Interrupt, Self::Error> {
+        self.receiver.changed().await.map(|_| Interrupt)
     }
 }

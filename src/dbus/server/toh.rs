@@ -6,13 +6,13 @@
 
 use super::borrow::*;
 use crate::{
+    back_cover::InterruptReceiver,
     dbus::error::*,
     i2cdev::I2cDev,
-    toh::{config::Permissions, Info, Interrupt},
+    toh::{config::Permissions, Info, Interrupt, WaitInterrupt},
 };
 use std::collections::HashMap;
 use std::os::fd::AsFd;
-use tokio::sync::watch::Receiver;
 use zbus::{fdo::DBusProxy, interface, message::Header, Connection};
 use zvariant::{Fd, Optional, OwnedValue};
 
@@ -24,17 +24,17 @@ use zvariant::{Fd, Optional, OwnedValue};
 pub struct Toh {
     info: Info,
     permissions: Permissions,
-    receiver: Receiver<Interrupt>,
+    receiver: InterruptReceiver,
     watcher: Option<LoanWatcher>,
 }
 
 impl Toh {
     /// Create new representation from TOH info.
-    pub fn new(info: Info, permissions: Permissions, receiver: Receiver<Interrupt>) -> Self {
+    pub fn new(info: Info, permissions: Permissions, receiver: InterruptReceiver) -> Self {
         Self {
             info,
             permissions,
-            receiver: receiver,
+            receiver,
             watcher: None,
         }
     }

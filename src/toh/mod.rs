@@ -15,7 +15,3 @@ pub use config::{ConfigError, Configs, Devices, Overrides, Units};
 pub use info::*;
 pub use traits::*;
 pub use value::{ExtraValue, NonConvertableValue};
-
-// XXX: API for interrupts?!?
-// Interrupt.
-pub struct Interrupt;

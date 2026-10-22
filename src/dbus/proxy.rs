@@ -74,4 +74,12 @@ pub trait Toh {
     ///
     /// Only available to the process that had borrowed the access.
     fn return_i2c_dev_access(&mut self) -> Result<(), ReturnError>;
+
+    /// Subscribe to interrupts.
+    ///
+    /// This returns a socket file descriptor that only receives empty packets on interrupts for
+    /// this TOH. The sending end of the socket is closed when TOH is disconnected.
+    ///
+    /// Does not affect device power. This can be called multiple times by different callers.
+    fn subscribe_interrupts(&mut self) -> fdo::Result<OwnedFd>;
 }

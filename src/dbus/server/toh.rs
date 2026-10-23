@@ -21,10 +21,6 @@ use tokio::{spawn, sync::Mutex, task::JoinHandle};
 use zbus::{fdo::DBusProxy, interface, message::Header, Connection};
 use zvariant::{Fd, Optional, OwnedValue};
 
-// TODO: Similar borrowing interface for interrupts from TOH:
-// I.e. the service should monitor interrupt pin and react differently to disconnects and TOH
-// mcu initiated interrupts.
-
 /// Representation of TOH on D-Bus.
 pub struct Toh {
     info: Info,

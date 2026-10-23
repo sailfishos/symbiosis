@@ -10,10 +10,9 @@ use zbus::DBusError;
 #[derive(DBusError, Debug)]
 #[zbus(prefix = "org.sailfishos.tohd1")]
 pub enum BorrowError {
-    /// The process trying to borrow is not run as _root_ or _privileged_.
+    /// The process trying to borrow is not allowed to borrow by configuration.
     ///
-    /// This restriction may get lifted in the future if a more suitable access control mechanism is
-    /// implemented.
+    /// When caller is _root_ it is allowed to borrow it regardless of the configuration.
     AccessDenied,
     /// The device was already borrowed.
     AlreadyBorrowed,

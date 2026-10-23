@@ -40,7 +40,7 @@ pub trait Detect {
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error>;
 }
 
-/// Interrupt.
+// TODO: Document this.
 #[derive(Debug)]
 pub struct Interrupt;
 

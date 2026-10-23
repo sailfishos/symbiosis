@@ -222,8 +222,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                     let result = object_server.remove::<Toh, _>(TOH_PATH).await;
 
-                    // End the borrow and abort watcher if there is any.
-                    toh.get_mut().await.abort_watcher().await;
+                    // End the borrow and abort watcher if there is any and join interrupt task
+                    // handle.
+                    toh.get_mut().await.finish().await;
 
                     // Now that the TOH is handled, let's return errors if there are any.
                     disconnect_result?;

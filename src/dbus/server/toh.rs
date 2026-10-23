@@ -9,10 +9,15 @@ use crate::{
     back_cover::InterruptReceiver,
     dbus::error::*,
     i2cdev::I2cDev,
-    toh::{config::Permissions, Info, Interrupt, WaitInterrupt},
+    toh::{config::Permissions, Info, WaitInterrupt},
 };
 use std::collections::HashMap;
+use std::io::{ErrorKind, Write};
+use std::net::Shutdown;
 use std::os::fd::AsFd;
+use std::os::unix::net::UnixStream;
+use std::sync::Arc;
+use tokio::{spawn, sync::Mutex, task::JoinHandle};
 use zbus::{fdo::DBusProxy, interface, message::Header, Connection};
 use zvariant::{Fd, Optional, OwnedValue};
 
@@ -24,17 +29,44 @@ use zvariant::{Fd, Optional, OwnedValue};
 pub struct Toh {
     info: Info,
     permissions: Permissions,
-    receiver: InterruptReceiver,
+    subscribers: Arc<Mutex<Vec<UnixStream>>>,
+    handle: Option<JoinHandle<()>>,
     watcher: Option<LoanWatcher>,
 }
 
 impl Toh {
     /// Create new representation from TOH info.
-    pub fn new(info: Info, permissions: Permissions, receiver: InterruptReceiver) -> Self {
+    pub fn new(info: Info, permissions: Permissions, mut receiver: InterruptReceiver) -> Self {
+        let subscribers: Arc<Mutex<Vec<UnixStream>>> = Default::default();
+        let arc = subscribers.clone();
+        let handle = Some(spawn(async move {
+            // Serve subscribers until sending end is closed.
+            while receiver.wait_interrupt().await.is_ok() {
+                log::debug!("New interrupt to send");
+                let mut guard = arc.lock().await;
+                let token = b"\0";
+                guard.retain(|mut subscriber| {
+                    match subscriber.write(token) {
+                        Ok(_) => true,
+                        Err(error) if error.kind() == ErrorKind::WouldBlock => true,
+                        Err(error) if error.kind() == ErrorKind::ConnectionReset => {
+                            // Subscriber closed the receiving end, it can be cleaned up.
+                            false
+                        }
+                        Err(error) => {
+                            log::warn!("Unexpected error while sending interrupt notification to subscriber: {error}");
+                            false
+                        }
+                    }
+                });
+            }
+            log::debug!("Stopped sending interrupt notifications");
+        }));
         Self {
             info,
             permissions,
-            receiver,
+            subscribers,
+            handle,
             watcher: None,
         }
     }
@@ -46,6 +78,28 @@ impl Toh {
         if let Some(watcher) = self.watcher.take() {
             watcher.take_loan_and_abort().await.map(Loan::end);
         }
+    }
+
+    /// Abort interrupt task.
+    ///
+    /// This is to be used when TOH is removed from device.
+    pub async fn abort_interrupt_task(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            if !handle.is_finished() {
+                handle.abort();
+            }
+            let _ = handle.await;
+        }
+    }
+
+    /// Abort.
+    ///
+    /// Abort watcher, end loan and join interrupt handler task.
+    ///
+    /// This is to be used when TOH is removed from device.
+    pub async fn finish(&mut self) {
+        self.abort_watcher().await;
+        self.abort_interrupt_task().await;
     }
 
     async fn lend_i2c_dev(
@@ -239,8 +293,36 @@ impl Toh {
     /// this TOH. The sending end of the socket is closed when TOH is disconnected.
     ///
     /// Does not affect device power. This can be called multiple times by different callers.
-    fn subscribe_interrupts(&mut self) -> Fd<'static> {
-        let _ = &self.receiver;
-        todo!()
+    async fn subscribe_interrupts(
+        &mut self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &Connection,
+    ) -> Result<Fd<'static>, SubscribeError> {
+        let sender = header.sender().ok_or(SubscribeError::NoSender)?.to_owned();
+        let proxy = DBusProxy::new(connection).await?;
+        let creds = proxy
+            .get_connection_credentials(sender.clone().into())
+            .await?;
+        let ok = if creds.unix_user_id().ok_or(SubscribeError::NoUid)? == 0 {
+            // Root is always okay
+            true
+        } else {
+            let pid: i32 = creds
+                .process_id()
+                .expect("Process ID is available on Linux")
+                .try_into()
+                .expect("Process ID fits into i32 as it is lower than 4194304");
+            self.permissions.is_allowed_for_interrupts(pid)?
+        };
+        if ok {
+            let (recv, send) = UnixStream::pair()?;
+            recv.set_nonblocking(true)?;
+            self.subscribers.lock().await.push(recv);
+            send.shutdown(Shutdown::Write)?;
+            let fd = send.as_fd().as_fd().try_clone_to_owned()?;
+            Ok(Fd::Owned(fd))
+        } else {
+            Err(SubscribeError::AccessDenied)
+        }
     }
 }

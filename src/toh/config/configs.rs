@@ -83,8 +83,10 @@ pub struct Units<S: state::State + Send> {
 /// Access permissions from [`Configs`].
 #[derive(Debug, Default)]
 pub struct Permissions {
-    /// Binaries that can access i2c-dev
+    /// Binaries that can access i2c-dev.
     i2c_dev_exe_paths: HashSet<PathBuf>,
+    /// Binaries that can subscribe to interrupts.
+    interrupt_exe_paths: HashSet<PathBuf>,
 }
 
 /// Bound target devices on bus from [`Configs`].
@@ -161,6 +163,7 @@ impl Configs {
         }
         if let Some(access) = access {
             self.access.i2c_dev.extend(access.i2c_dev);
+            self.access.interrupts.extend(access.interrupts);
         }
         self.devices.extend(devices);
     }
@@ -185,6 +188,11 @@ impl Configs {
             Permissions {
                 i2c_dev_exe_paths: access
                     .i2c_dev
+                    .into_iter()
+                    .map(|value| value.into())
+                    .collect(),
+                interrupt_exe_paths: access
+                    .interrupts
                     .into_iter()
                     .map(|value| value.into())
                     .collect(),
@@ -316,5 +324,11 @@ impl Permissions {
     pub(crate) fn is_allowed_for_i2c_dev(&self, pid: i32) -> Result<bool, procfs::ProcError> {
         let path = procfs::process::Process::new(pid)?.exe()?;
         Ok(!path.ends_with(" (deleted)") && self.i2c_dev_exe_paths.contains(&path))
+    }
+
+    /// Checks if process is allowed to subscribe to interrupts.
+    pub(crate) fn is_allowed_for_interrupts(&self, pid: i32) -> Result<bool, procfs::ProcError> {
+        let path = procfs::process::Process::new(pid)?.exe()?;
+        Ok(!path.ends_with(" (deleted)") && self.interrupt_exe_paths.contains(&path))
     }
 }

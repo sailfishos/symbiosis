@@ -81,5 +81,5 @@ pub trait Toh {
     /// this TOH. The sending end of the socket is closed when TOH is disconnected.
     ///
     /// Does not affect device power. This can be called multiple times by different callers.
-    fn subscribe_interrupts(&mut self) -> fdo::Result<OwnedFd>;
+    fn subscribe_interrupts(&mut self) -> Result<OwnedFd, SubscribeError>;
 }

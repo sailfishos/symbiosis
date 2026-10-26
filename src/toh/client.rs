@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::{
-    dbus::error::{BorrowError, ReturnError},
+    dbus::error::{BorrowError, ReturnError, SubscribeError},
     dbus::TohProxy,
     errors::ExtraValueConversionError,
     i2cdev::I2cDev,
@@ -15,9 +15,11 @@ use crate::{
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use std::collections::BTreeMap;
+use std::io;
 use std::os::fd::OwnedFd;
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::UnixStream as StdUnixStream;
 use thiserror::Error;
+use tokio::net::UnixStream;
 use zbus::{
     fdo::{Error as DBusError, PeerProxy},
     Connection,
@@ -42,7 +44,7 @@ pub enum AccessError<T> {
     Borrow(#[from] BorrowError),
     /// IO error with the device.
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] io::Error),
     /// Error while returning the device.
     #[error("Returning failed: {1}")]
     Return(T, ReturnError),
@@ -52,6 +54,20 @@ impl<T> From<(ReturnError, T)> for AccessError<T> {
     fn from((error, value): (ReturnError, T)) -> Self {
         AccessError::Return(value, error)
     }
+}
+
+/// Error while trying to subscribe to interrupts.
+#[derive(Debug, Error)]
+pub enum SubscribeInterruptError {
+    /// D-Bus error happened.
+    #[error("D-Bus error: {0}")]
+    DBus(#[from] DBusError),
+    /// Subscribing error happened.
+    #[error("Subscribe error: {0}")]
+    Subscribe(#[from] SubscribeError),
+    /// IO error with the file descriptor.
+    #[error("IO error: {0}")]
+    Io(#[from] io::Error),
 }
 
 /// Client side implementation.
@@ -143,16 +159,11 @@ impl<'proxy> Toh<'proxy> {
             },
         )
     }
-
-    async fn fetch_interrupt_subscription(&mut self) -> Result<UnixStream, DBusError> {
-        let fd = self.toh.subscribe_interrupts().await?;
-        Ok(UnixStream::from(OwnedFd::from(fd)))
-    }
 }
 
 #[async_trait]
 impl<'proxy> IsPowered for &Toh<'proxy> {
-    type Error = std::io::Error;
+    type Error = io::Error;
     async fn is_powered(&mut self) -> Result<bool, Self::Error> {
         Power::read_only()?.is_powered()
     }
@@ -185,6 +196,67 @@ impl<'proxy> Detect for &Toh<'proxy> {
             Ok(info) => Ok(Some(info)),
             Err(FetchingInfoError::DBus(DBusError::UnknownObject(..))) => Ok(None),
             Err(error) => Err(error),
+        }
+    }
+}
+
+/// Subscription to TOH interrupts.
+///
+/// This allows to wait for interrupts on the connected TOH.
+pub struct InterruptSubscription {
+    stream: UnixStream,
+}
+
+/// Error while waiting for interrupts.
+#[derive(Debug, Error)]
+pub enum WaitInterruptError {
+    /// TOH was disconnected.
+    #[error("TOH disconnected")]
+    Disconnected,
+    /// IO error with the stream.
+    #[error("IO error: {0}")]
+    Io(#[from] io::Error),
+}
+
+#[async_trait]
+impl<'proxy> SubscribeInterrupt for Toh<'proxy> {
+    type Receiver = InterruptSubscription;
+    type Error = SubscribeInterruptError;
+
+    async fn subscribe_interrupt(&mut self) -> Result<Self::Receiver, Self::Error> {
+        let fd = self.toh.subscribe_interrupts().await?;
+        let stream = StdUnixStream::from(OwnedFd::from(fd));
+        stream.set_nonblocking(true)?;
+        let stream = UnixStream::from_std(stream)?;
+        Ok(InterruptSubscription { stream })
+    }
+}
+
+#[async_trait]
+impl WaitInterrupt for InterruptSubscription {
+    type Error = WaitInterruptError;
+
+    async fn wait_interrupt(&mut self) -> Result<Interrupt, Self::Error> {
+        self.stream.readable().await?;
+        let mut buf = [0u8; 64];
+        loop {
+            match self.stream.try_read(&mut buf) {
+                Ok(0) => return Err(WaitInterruptError::Disconnected),
+                Ok(_) => {
+                    // Read the stream until there is no more data.
+                    continue;
+                }
+                Err(ref error) if error.kind() == io::ErrorKind::ConnectionReset => {
+                    return Err(WaitInterruptError::Disconnected)
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    // No more data, return interrupt.
+                    return Ok(Interrupt);
+                }
+                Err(error) => {
+                    return Err(error.into());
+                }
+            }
         }
     }
 }

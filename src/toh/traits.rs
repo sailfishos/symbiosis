@@ -40,7 +40,11 @@ pub trait Detect {
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error>;
 }
 
-// TODO: Document this.
+/// Interrupt from TOH.
+///
+/// The service controlling TOH should promptly react to this and tell TOH to release interrupt
+/// line. Otherwise symbiosis well keep checking if TOH has been disconnected which may increase
+/// battery consumption.
 #[derive(Debug)]
 pub struct Interrupt;
 

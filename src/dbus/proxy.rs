@@ -77,9 +77,10 @@ pub trait Toh {
 
     /// Subscribe to interrupts.
     ///
-    /// This returns a socket file descriptor that only receives empty packets on interrupts for
+    /// This returns a socket file descriptor that only receives one byte packets on interrupts for
     /// this TOH. The sending end of the socket is closed when TOH is disconnected.
     ///
-    /// Does not affect device power. This can be called multiple times by different callers.
+    /// Calling this does not affect device power. This can be called multiple times by different
+    /// callers.
     fn subscribe_interrupts(&mut self) -> Result<OwnedFd, SubscribeError>;
 }

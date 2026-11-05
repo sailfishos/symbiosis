@@ -359,10 +359,15 @@ impl<P: state::State + std::marker::Send> WaitDisconnect for BackCover<P> {
                 let _ = self.channel.send(Interrupt);
                 // Wait until interrupt is cleared or TOH is removed (periodic ADC checks).
                 while self.id.read()?.is_toh_present() {
-                    timeout(Duration::from_millis(500), self.int.watch(IntState::High))
+                    if timeout(Duration::from_millis(500), self.int.watch(IntState::Low))
                         .await
                         .ok()
-                        .transpose()?;
+                        .transpose()?
+                        .is_some()
+                    {
+                        // INT is low again => interrupt was cleared
+                        break;
+                    }
                 }
             }
         }

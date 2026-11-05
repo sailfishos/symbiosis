@@ -45,7 +45,7 @@ impl Toh {
                     match subscriber.write(token) {
                         Ok(_) => true,
                         Err(error) if error.kind() == ErrorKind::WouldBlock => true,
-                        Err(error) if error.kind() == ErrorKind::ConnectionReset => {
+                        Err(error) if error.kind() == ErrorKind::BrokenPipe => {
                             // Subscriber closed the receiving end, it can be cleaned up.
                             false
                         }

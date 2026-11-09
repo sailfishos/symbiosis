@@ -5,7 +5,9 @@
 //! D-Bus server side stuff.
 
 use super::borrow::*;
+use super::subscribe::*;
 use crate::{
+    back_cover::InterruptReceiver,
     dbus::error::*,
     i2cdev::I2cDev,
     toh::{config::Permissions, Info},
@@ -15,34 +17,45 @@ use std::os::fd::AsFd;
 use zbus::{fdo::DBusProxy, interface, message::Header, Connection};
 use zvariant::{Fd, Optional, OwnedValue};
 
-// TODO: Similar borrowing interface for interrupts from TOH:
-// I.e. the service should monitor interrupt pin and react differently to disconnects and TOH
-// mcu initiated interrupts.
-
 /// Representation of TOH on D-Bus.
 pub struct Toh {
     info: Info,
     permissions: Permissions,
+    subscribers: Subscribers,
     watcher: Option<LoanWatcher>,
 }
 
 impl Toh {
     /// Create new representation from TOH info.
-    pub fn new(info: Info, permissions: Permissions) -> Self {
+    pub fn new(info: Info, permissions: Permissions, receiver: InterruptReceiver) -> Self {
         Self {
             info,
             permissions,
+            subscribers: Subscribers::new(receiver),
             watcher: None,
         }
     }
 
     /// Abort watcher and end loan.
-    ///
-    /// This is to be used when TOH is removed from device.
     pub async fn abort_watcher(&mut self) {
         if let Some(watcher) = self.watcher.take() {
             watcher.take_loan_and_abort().await.map(Loan::end);
         }
+    }
+
+    /// Abort and join the subscribers background task.
+    pub async fn abort_subscribers(&mut self) {
+        self.subscribers.abort().await;
+    }
+
+    /// Finish all work on TOH.
+    ///
+    /// Abort watcher, end loan and join handler tasks.
+    ///
+    /// This is to be used when TOH is removed from device.
+    pub async fn finish(&mut self) {
+        self.abort_watcher().await;
+        self.abort_subscribers().await;
     }
 
     async fn lend_i2c_dev(
@@ -228,5 +241,41 @@ impl Toh {
             }
         }
         Err(ReturnError::NoLoan)
+    }
+
+    /// Subscribe to interrupts.
+    ///
+    /// This returns a socket file descriptor that only receives one byte packets on interrupts for
+    /// this TOH. The sending end of the socket is closed when TOH is disconnected.
+    ///
+    /// Calling this does not affect device power. This can be called multiple times by different
+    /// callers.
+    async fn subscribe_interrupts(
+        &mut self,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] connection: &Connection,
+    ) -> Result<Fd<'static>, SubscribeError> {
+        let sender = header.sender().ok_or(SubscribeError::NoSender)?.to_owned();
+        let proxy = DBusProxy::new(connection).await?;
+        let creds = proxy
+            .get_connection_credentials(sender.clone().into())
+            .await?;
+        let ok = if creds.unix_user_id().ok_or(SubscribeError::NoUid)? == 0 {
+            // Root is always okay.
+            true
+        } else {
+            let pid: i32 = creds
+                .process_id()
+                .expect("Process ID is available on Linux")
+                .try_into()
+                .expect("Process ID fits into i32 as it is lower than 4194304");
+            self.permissions.is_allowed_for_interrupts(pid)?
+        };
+        if ok {
+            let subscription = self.subscribers.create_subscription().await?;
+            Ok(Fd::Owned(subscription.0))
+        } else {
+            Err(SubscribeError::AccessDenied)
+        }
     }
 }

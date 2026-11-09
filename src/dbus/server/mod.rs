@@ -5,6 +5,7 @@
 //! D-Bus server side stuff.
 
 mod borrow;
+mod subscribe;
 mod toh;
 
 pub use toh::Toh;

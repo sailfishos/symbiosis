@@ -64,6 +64,14 @@ Requires: %{name} = %{version}-%{release}
 This provides a simple example that tests I²C performance. Make a symlink for
 your TOH to enable it.
 
+%package examples-interrupt
+Summary:  Interrupt example for %{name}
+Provides: toh-tools = %{version}-%{release}
+Requires: %{name} = %{version}-%{release}
+
+%description examples-interrupt
+This provides a simple example that demonstrates interrupt pin use.
+
 %prep
 %autosetup -a1 -n %{name}-%{version}
 
@@ -140,6 +148,10 @@ install -D -m0644 examples/blinker/blinker.yaml %{buildroot}%{tohdatadir}/exampl
 install -D -m0755 %{rustbuilddir}/examples/i2c-speed-test %{buildroot}%{_libexecdir}/toh/i2c-speed-test
 install -D -m0644 examples/i2c-speed-test/i2c-speed-test.yaml %{buildroot}%{tohdatadir}/examples/i2c-speed-test.yaml
 
+# Interrupt example
+install -D -m0755 %{rustbuilddir}/examples/interrupt %{buildroot}%{_libexecdir}/toh/interrupt
+install -D -m0644 examples/interrupt/interrupt.yaml %{buildroot}%{tohdatadir}/examples/interrupt.yaml
+
 %post
 systemctl daemon-reload || :
 systemctl reload-or-try-restart %{name}.service || :
@@ -177,3 +189,8 @@ systemctl daemon-reload || :
 %{_libexecdir}/toh/i2c-speed-test
 %dir %{tohdatadir}/examples
 %{tohdatadir}/examples/i2c-speed-test.yaml
+
+%files examples-interrupt
+%{_libexecdir}/toh/interrupt
+%dir %{tohdatadir}/examples
+%{tohdatadir}/examples/interrupt.yaml

@@ -10,7 +10,10 @@ mod info;
 pub mod traits;
 mod value;
 
-pub use client::{FetchingInfoError, Toh};
+pub use crate::dbus::error::{BorrowError, ReturnError, SubscribeError};
+pub use client::{
+    FetchingInfoError, InterruptSubscription, SubscribeInterruptsError, Toh, WaitInterruptError,
+};
 pub use config::{ConfigError, Configs, Devices, Overrides, Units};
 pub use info::*;
 pub use traits::*;

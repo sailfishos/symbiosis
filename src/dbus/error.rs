@@ -67,3 +67,42 @@ impl From<std::io::Error> for ReturnError {
         ReturnError::PowerDownFailed
     }
 }
+
+/// Error while subscribing to interrupts.
+#[derive(DBusError, Debug)]
+#[zbus(prefix = "org.sailfishos.tohd1")]
+pub enum SubscribeError {
+    /// The process trying to subscribe but it is not allowed by configuration.
+    ///
+    /// When caller is _root_ it is allowed to subscribe regardless of the configuration.
+    AccessDenied,
+    /// No sender in message header.
+    NoSender,
+    /// No uid in credentials returned by D-Bus.
+    NoUid,
+    /// No process status or process status could not be fetched.
+    NoProcessStatus,
+    /// IO error.
+    IOError,
+    /// Internal errors or anything else.
+    #[zbus(error)]
+    ZBus(zbus::Error),
+}
+
+impl From<zbus::fdo::Error> for SubscribeError {
+    fn from(error: zbus::fdo::Error) -> Self {
+        SubscribeError::ZBus(error.into())
+    }
+}
+
+impl From<std::io::Error> for SubscribeError {
+    fn from(_error: std::io::Error) -> Self {
+        SubscribeError::IOError
+    }
+}
+
+impl From<procfs::ProcError> for SubscribeError {
+    fn from(_error: procfs::ProcError) -> Self {
+        SubscribeError::NoProcessStatus
+    }
+}

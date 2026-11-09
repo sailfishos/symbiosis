@@ -7,15 +7,16 @@
 
 use argh::FromArgs;
 use log::{debug, info, warn, LevelFilter};
+use std::convert::Infallible;
 use std::error::Error;
 use std::time::Duration;
 use symbiosis::{
     back_cover::{
-        BackCover, DetectionError, EnableTargetDevices, IdentificationError, PowerDown, Variant,
-        WaitDisconnect,
+        BackCover, DetectionError, EnableTargetDevices, IdentificationError, InterruptReceiver,
+        PowerDown, Variant, WaitDisconnect,
     },
     dbus::server::Toh,
-    toh::{Detect, IsPresent},
+    toh::{Detect, IsPresent, SubscribeInterrupts},
 };
 use systemd_journal_logger::JournalLog;
 use tokio::{
@@ -111,12 +112,26 @@ impl LastError {
     }
 }
 
-trait BackCoverDetect: WaitDisconnect + Detect + PowerDown + EnableTargetDevices {
+trait BackCoverDetect:
+    WaitDisconnect
+    + Detect<Error = DetectionError>
+    + PowerDown
+    + EnableTargetDevices
+    + SubscribeInterrupts<Error = Infallible, Receiver = InterruptReceiver>
+{
     // Rust 1.86.0 gets rid of this
     fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect>;
 }
 
-impl<T: WaitDisconnect + Detect + PowerDown + EnableTargetDevices + 'static> BackCoverDetect for T {
+impl<
+        T: WaitDisconnect
+            + Detect<Error = DetectionError>
+            + PowerDown
+            + EnableTargetDevices
+            + SubscribeInterrupts<Error = Infallible, Receiver = InterruptReceiver>
+            + 'static,
+    > BackCoverDetect for T
+{
     // Rust 1.86.0 gets rid of this
     fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect> {
         self
@@ -187,35 +202,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         let back_cover = back_cover.wait_connect().await?;
         debug!("TOH connected");
-        let detect: Option<Box<dyn BackCoverDetect<Error = DetectionError>>> =
-            match back_cover.power_up().await {
-                Ok(Variant::With256BBlocks(back_cover)) => {
-                    debug!("Up to 256B block memory chip detected");
-                    Some(Box::new(back_cover))
+        let detect: Option<Box<dyn BackCoverDetect>> = match back_cover.power_up().await {
+            Ok(Variant::With256BBlocks(back_cover)) => {
+                debug!("Up to 256B block memory chip detected");
+                Some(Box::new(back_cover))
+            }
+            Ok(Variant::With64kBBlocks(back_cover)) => {
+                debug!("Up to 64k block memory chip detected");
+                Some(Box::new(back_cover))
+            }
+            Ok(Variant::WithoutMemoryChip(back_cover)) => {
+                debug!("TOH without memory chip detected");
+                Some(Box::new(back_cover))
+            }
+            Ok(Variant::Attached(_)) => {
+                if last_error.update(LastErrorKind::UnsupportedToh) {
+                    info!("Unsupported TOH type connected");
                 }
-                Ok(Variant::With64kBBlocks(back_cover)) => {
-                    debug!("Up to 64k block memory chip detected");
-                    Some(Box::new(back_cover))
+                None
+            }
+            Err(error) => {
+                if last_error.update_from_identification_error(&error) {
+                    warn!("TOH power up failed: {error}");
+                } else {
+                    debug!("Repeated identification error: {error}");
                 }
-                Ok(Variant::WithoutMemoryChip(back_cover)) => {
-                    debug!("TOH without memory chip detected");
-                    Some(Box::new(back_cover))
-                }
-                Ok(Variant::Attached(_)) => {
-                    if last_error.update(LastErrorKind::UnsupportedToh) {
-                        info!("Unsupported TOH type connected");
-                    }
-                    None
-                }
-                Err(error) => {
-                    if last_error.update_from_identification_error(&error) {
-                        warn!("TOH power up failed: {error}");
-                    } else {
-                        debug!("Repeated identification error: {error}");
-                    }
-                    None
-                }
-            };
+                None
+            }
+        };
         if let Some(mut back_cover) = detect {
             // Wait a bit after powering up so the chip has a chance to be ready
             sleep(Duration::from_millis(100)).await;
@@ -240,6 +254,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                     .unzip();
 
+                    let receiver = back_cover.subscribe_interrupts().await.expect("Infallible");
+
                     // Power down if requested.
                     let back_cover: Box<dyn WaitDisconnect> =
                         if info.leave_power_on.unwrap_or(false) {
@@ -249,7 +265,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         };
 
                     // Publish TOH on D-Bus before starting services
-                    let toh = Toh::new(info, permissions.unwrap_or_default());
+                    let toh = Toh::new(info, permissions.unwrap_or_default(), receiver);
                     object_server.at(TOH_PATH, toh).await?;
 
                     // Wait for disconnect already while starting units
@@ -277,8 +293,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                     let result = object_server.remove::<Toh, _>(TOH_PATH).await;
 
-                    // End the borrow and abort watcher if there is any.
-                    toh.get_mut().await.abort_watcher().await;
+                    // End the borrow and abort watcher if there is any and join interrupt task
+                    // handle.
+                    toh.get_mut().await.finish().await;
 
                     // Now that the TOH is handled, let's return errors if there are any.
                     disconnect_result?;

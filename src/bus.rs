@@ -47,15 +47,7 @@ pub(crate) fn find_toh_i2c_bus() -> io::Result<u8> {
                 .unwrap_or(false)
         })
         .map(|entry| entry.file_name())
-        .filter_map(|name| {
-            let name = name.to_str()?;
-            if name.starts_with("i2c-") {
-                let (_, number) = name.split_at(4);
-                number.parse::<u8>().ok()
-            } else {
-                None
-            }
-        })
+        .filter_map(|name| name.to_str()?.strip_prefix("i2c-")?.parse::<u8>().ok())
         .next()
         .ok_or(Error::new(
             ErrorKind::NotFound,
@@ -149,13 +141,10 @@ impl I2cBus {
             })
             .map(|entry| entry.path())
             .filter_map(|path| {
-                let name = path.file_name()?.to_str()?;
-                if name.starts_with(&filter) {
-                    let (_, address) = name.split_at(filter.len());
-                    u8::from_str_radix(address, 16).ok()
-                } else {
-                    None
-                }
+                path.file_name()?
+                    .to_str()?
+                    .strip_prefix(&filter)
+                    .and_then(|address| u8::from_str_radix(address, 16).ok())
             })
             .map(|address| {
                 log::debug!("Removing target 0x{address:02x} from i2c-{}", self.bus);

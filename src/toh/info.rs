@@ -16,7 +16,7 @@ use std::num::TryFromIntError;
 use thiserror::Error;
 
 /// Parsing of memory chip content failed.
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, Error)]
 pub enum ParseError {
     /// Header did not unpack.
     #[error("Bad header: {0}")]
@@ -32,7 +32,7 @@ pub enum ParseError {
     NotEnoughData(#[from] MissingDataError),
     /// Payload did not parse correctly.
     #[error("CBOR parsing failed: {0}")]
-    PayloadParsingError(CBORParsingError),
+    PayloadParsingError(#[from] ciborium::de::Error<std::io::Error>),
     /// Payload had wrong type for a known key.
     #[error("Payload had unexpected type for a known key, value: {0:?}")]
     PayloadWrongType(ciborium::Value),
@@ -44,19 +44,12 @@ pub enum ParseError {
     PayloadUnsupportedValue(#[from] ExtraValueConversionError),
 }
 
-impl From<ciborium::de::Error<std::io::Error>> for ParseError {
-    fn from(error: ciborium::de::Error<std::io::Error>) -> Self {
-        ParseError::PayloadParsingError(error.into())
-    }
-}
-
 impl From<ciborium::Value> for ParseError {
     fn from(error: ciborium::Value) -> Self {
         ParseError::PayloadWrongType(error)
     }
 }
 
-// TODO: How about chipless TOHs? Perhaps we need an enum
 /// TOH memory chip content.
 #[derive(Debug, Default, Deserialize, PartialEq)]
 pub struct Info {

@@ -48,9 +48,8 @@ fn read_content(back_cover: Variant) -> std::io::Result<Option<Vec<u8>>> {
             back_cover.power_down()?;
             Ok(None)
         }
-        Variant::Attached(back_cover) => {
+        Variant::Attached(_) => {
             println!("Unsupported TOH");
-            back_cover.power_down()?;
             Ok(None)
         }
     }

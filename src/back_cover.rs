@@ -32,10 +32,14 @@ mod state {
     pub trait State {}
     pub trait Identifiable {}
 
-    /// TOH has not been been detected.
+    /// TOH was not detected.
+    ///
+    /// Either it is not connected or it has not been checked.
     pub struct Detached {}
 
-    /// TOH has been detected but not identified.
+    /// TOH was found but it needs to be identified for detection.
+    ///
+    /// This is also the state that remains when TOH is not of a supported type.
     pub struct Attached {}
 
     /// Memory chip is readable with 8-bit data addressing.
@@ -280,15 +284,15 @@ impl<P: state::State + std::marker::Send> BackCover<P> {
 /// Trait for [`power_down`](Self::power_down) method.
 pub trait PowerDown {
     /// Power down TOH.
-    fn power_down(self) -> io::Result<BackCover<state::Detached>>;
+    fn power_down(self) -> io::Result<BackCover<state::Attached>>;
 
     // NB: Just to workaround some inconveniences in Rust.
     /// Power down TOH.
-    fn power_down_boxed(self: Box<Self>) -> io::Result<BackCover<state::Detached>>;
+    fn power_down_boxed(self: Box<Self>) -> io::Result<BackCover<state::Attached>>;
 }
 
-impl<P: state::State + std::marker::Send> PowerDown for BackCover<P> {
-    fn power_down(self) -> io::Result<BackCover<state::Detached>> {
+impl<S: state::State + std::marker::Send + state::Identifiable> PowerDown for BackCover<S> {
+    fn power_down(self) -> io::Result<BackCover<state::Attached>> {
         let BackCover {
             id,
             i2c,
@@ -308,7 +312,7 @@ impl<P: state::State + std::marker::Send> PowerDown for BackCover<P> {
         })
     }
 
-    fn power_down_boxed(self: Box<Self>) -> io::Result<BackCover<state::Detached>> {
+    fn power_down_boxed(self: Box<Self>) -> io::Result<BackCover<state::Attached>> {
         self.power_down()
     }
 }

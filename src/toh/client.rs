@@ -19,34 +19,92 @@ use zbus::{
     Connection,
 };
 
+/// Common error.
+#[derive(Debug, Error)]
+pub enum CommonError {
+    /// TOH object is not present.
+    ///
+    /// This could mean that TOH is disconnected or is of an unsupported type.
+    #[error("TOH is not present or is of an unsupported type")]
+    Disconnected,
+    /// The D-Bus service was not found.
+    ///
+    /// This likely means that the daemon is not running.
+    #[error("TOH daemon is not running")]
+    DaemonNotRunning,
+    /// D-Bus error happened.
+    #[error("D-Bus error: {0}")]
+    DBus(DBusError),
+}
+
+impl From<DBusError> for CommonError {
+    fn from(error: DBusError) -> Self {
+        match error {
+            DBusError::UnknownObject(..) => Self::Disconnected,
+            DBusError::ServiceUnknown(..) => Self::DaemonNotRunning,
+            other => Self::DBus(other),
+        }
+    }
+}
+
+impl From<zbus::Error> for CommonError {
+    fn from(error: zbus::Error) -> Self {
+        DBusError::from(error).into()
+    }
+}
+
 /// Error while fetching TOH info.
 #[derive(Debug, Error)]
 pub enum FetchingInfoError {
-    /// D-Bus error happened.
-    #[error("D-Bus error: {0}")]
-    DBus(#[from] DBusError),
+    /// Common error happened.
+    #[error(transparent)]
+    Common(CommonError),
     /// Conversion error happened.
     #[error("Conversion error: {0}")]
     Conversion(#[from] ExtraValueConversionError),
 }
 
+impl From<DBusError> for FetchingInfoError {
+    fn from(error: DBusError) -> Self {
+        Self::Common(error.into())
+    }
+}
+
 /// Error while trying to access i2c-dev device.
 #[derive(Debug, Error)]
 pub enum AccessError<T> {
+    /// Common error happened while borrowing the device.
+    #[error(transparent)]
+    CommonErrorOnBorrow(CommonError),
     /// Error while borrowing the device.
     #[error("Borrowing failed: {0}")]
-    Borrow(#[from] BorrowError),
+    Borrow(BorrowError),
     /// IO error with the device.
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
+    /// Common error happened while returning the device.
+    #[error("{1}")]
+    CommonErrorOnReturn(T, CommonError),
     /// Error while returning the device.
     #[error("Returning failed: {1}")]
     Return(T, ReturnError),
 }
 
+impl<T> From<BorrowError> for AccessError<T> {
+    fn from(error: BorrowError) -> Self {
+        match error {
+            BorrowError::ZBus(error) => Self::CommonErrorOnBorrow(error.into()),
+            other => Self::Borrow(other),
+        }
+    }
+}
+
 impl<T> From<(ReturnError, T)> for AccessError<T> {
     fn from((error, value): (ReturnError, T)) -> Self {
-        AccessError::Return(value, error)
+        match error {
+            ReturnError::ZBus(error) => Self::CommonErrorOnReturn(value, error.into()),
+            other => Self::Return(value, other),
+        }
     }
 }
 
@@ -174,7 +232,7 @@ impl<'proxy> Detect for &Toh<'proxy> {
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error> {
         match self.fetch_info().await {
             Ok(info) => Ok(Some(info)),
-            Err(FetchingInfoError::DBus(DBusError::UnknownObject(..))) => Ok(None),
+            Err(FetchingInfoError::Common(CommonError::Disconnected)) => Ok(None),
             Err(error) => Err(error),
         }
     }
@@ -191,9 +249,9 @@ pub struct InterruptSubscription {
 /// Error while trying to subscribe to interrupts.
 #[derive(Debug, Error)]
 pub enum SubscribeInterruptsError {
-    /// D-Bus error happened.
-    #[error("D-Bus error: {0}")]
-    DBus(#[from] DBusError),
+    /// Common error happened.
+    #[error(transparent)]
+    Common(#[from] CommonError),
     /// Subscribing error happened.
     #[error("Subscribe error: {0}")]
     Subscribe(SubscribeError),
@@ -205,7 +263,7 @@ pub enum SubscribeInterruptsError {
 impl From<SubscribeError> for SubscribeInterruptsError {
     fn from(error: SubscribeError) -> Self {
         if let SubscribeError::ZBus(error) = error {
-            Self::DBus(error.into())
+            Self::Common(error.into())
         } else {
             Self::Subscribe(error)
         }

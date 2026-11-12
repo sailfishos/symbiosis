@@ -14,7 +14,6 @@ use argh::FromArgs;
 use std::time::Duration;
 use symbiosis::toh::*;
 use tokio::time::sleep;
-use zbus::fdo::Error as DBusError;
 
 #[derive(FromArgs)]
 #[argh(description = "Control TOH LEDs")]
@@ -90,13 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Ok(None) => Err("TOH is not present or is of unsupported type".into()),
-        Err(FetchingInfoError::DBus(DBusError::ServiceUnknown(..))) => {
-            Err("TOH daemon is not running".into())
-        }
-        Err(FetchingInfoError::DBus(error)) => {
-            // Some other DBus related error
-            Err(format!("D-Bus error: {:?}", error).into())
-        }
+        Err(FetchingInfoError::Common(error)) => Err(error.to_string().into()),
         Err(FetchingInfoError::Conversion(error)) => {
             // Would not expect this kind of errors but who knows
             Err(format!("Conversion error: {error}").into())

@@ -39,3 +39,32 @@ pub trait Detect {
     /// may be populated from device or cache.
     async fn detect(&mut self) -> Result<Option<Info>, Self::Error>;
 }
+
+/// Interrupt from TOH.
+///
+/// The service controlling TOH should promptly react to this and tell TOH to release interrupt
+/// line. Otherwise symbiosis will keep checking if TOH has been disconnected which may increase
+/// battery consumption.
+#[derive(Debug)]
+pub struct Interrupt;
+
+/// Trait for [`wait_interrupt`](Self::wait_interrupt) method.
+#[allow(clippy::double_must_use)]
+#[async_trait]
+pub trait WaitInterrupt {
+    type Error;
+
+    /// Wait for interrupt.
+    async fn wait_interrupt(&mut self) -> Result<Interrupt, Self::Error>;
+}
+
+/// Trait for [`subscribe_interrupts`](Self::subscribe_interrupts) method.
+#[allow(clippy::double_must_use)]
+#[async_trait]
+pub trait SubscribeInterrupts {
+    type Receiver;
+    type Error;
+
+    /// Subscribe to interrupts.
+    async fn subscribe_interrupts(&mut self) -> Result<Self::Receiver, Self::Error>;
+}

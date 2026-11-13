@@ -120,6 +120,8 @@ pub(crate) struct Exec {
 pub(crate) struct Access {
     #[serde(default)]
     pub i2c_dev: Vec<Executable>,
+    #[serde(default)]
+    pub interrupts: Vec<Executable>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -424,6 +426,7 @@ access:
   i2c-dev:
     - /bin/foo
     - /usr/bin/libexec/bar
+  interrupts: [\"/opt/bar/bin/bar\"]
 ",
         )
         .unwrap();
@@ -437,6 +440,12 @@ access:
             .map(|p| p.0.to_str().unwrap())
             .collect();
         assert_eq!(value, ["/bin/foo", "/usr/bin/libexec/bar"]);
+        let value: Vec<_> = access
+            .interrupts
+            .iter()
+            .map(|p| p.0.to_str().unwrap())
+            .collect();
+        assert_eq!(value, ["/opt/bar/bin/bar"]);
     }
 
     #[test]
@@ -459,6 +468,7 @@ access:
             .map(|p| p.0.to_str().unwrap())
             .collect();
         assert_eq!(value, ["/bin/foo", "/bin/bar"]);
+        assert_eq!(access.interrupts, []);
     }
 
     #[test]

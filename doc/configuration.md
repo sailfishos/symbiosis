@@ -19,6 +19,8 @@ override:
 access:
   i2c-dev:
     - /usr/libexec/acme/controller
+  interrupts:
+    - /usr/libexec/acme/controller
 devices:
   # Exposes two addresses to i2c-dev
   - address: 0x45
@@ -57,8 +59,10 @@ Access
 ------
 Access control to TOH is provided via `access` object.
 
-Currently this only supports one member, `i2c-dev`, that takes a list of executable paths to allow access for.
-Processes created from those paths can borrow _i2c-dev character device_ as explained in [D-Bus interface documentation](dbus_interface.md#borrowing-i2c-dev-character-device).
+This takes two members, `i2c-dev` and `interrupts`, that both take a list of executable paths to allow access for.
+Processes created from `i2c-dev` paths can borrow _i2c-dev character device_ as explained in [Borrowing i2c-dev character device section of the D-Bus interface documentation](dbus_interface.md#borrowing-i2c-dev-character-device).
+Similarly processes created from `interrupts` list's paths can subscribe to TOH generated interrupts as explained in [subscribing to interrupts section of the D-Bus interface documentation](dbus_interface.md#subscribing-to-interrupts).
+If both features are used the in the same process, the executable path must be listed in both members separately.
 
 Devices
 -------

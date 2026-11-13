@@ -64,3 +64,32 @@ It is possible to gain access to the device as root user outside symbiosis and s
 It is also possible to share the file descriptor to other processes but that is not recommended.
 Well-behaving clients should use the device only through symbiosis and follow the contract above.
 Furthermore symbiosis allows access to the device without root user as long as the caller is allowed in configuration.
+
+Subscribing to interrupts
+-------------------------
+Services may also subscribe to TOH generated interrupts via the same D-Bus object.
+Interrupts can be subscribed by any process allowed by [configuration](configuration.md#access), and always by _root user_.
+All subscribers will receive the notifications.
+
+This functionality is exposed via the following method:
+| Method                | Description                                                                    |
+|-----------------------|--------------------------------------------------------------------------------|
+| `SubscribeInterrupts` | Returns file descriptor to socket that receives data when an interrupt occurs. |
+
+Calling `SubscribeInterrupts` does not affect TOH power and the subscription does not need to be cancelled by calling a D-Bus method.
+The return value is a file descriptor to a socket that receives a single byte on every interrupt that occurs.
+The caller may close the file descriptor if it no longer wishes to receive interrupt notifications.
+If the caller is the service controlling TOH, it should read all the bytes received and clear the interrupt as soon as possible.
+Clearing interrupt can happen for example by communicating with TOH over I²C.
+
+TOH generated interrupts are interrupts that happen after TOH has been successfully detected by symbiosis and TOH is raising the interrupt line by pulling INT pin high.
+Symbiosis detects this as TOH removal if ID pin voltage is outside the acceptable range.
+If symbiosis does not detect TOH removal, it sends an interrupt notification to all subscribed processes.
+Subscribed processes are recommended to read all received bytes and discard them before acting on an interrupt.
+On detected TOH removal symbiosis closes the sending end of the socket and a socket close should be interpreted as TOH removal.
+The socket cannot be used for sending information back to symbiosis.
+The file descriptor should be closed when it is not useful any more.
+
+This should not be used for counting interrupts as the number of bytes received does not necessarily represent the number of times the interrupt line was held high.
+Generally TOH should hold interrupt line high only when it wants to inform device side service that there is data to read.
+They must not send interrupts until TOH has been detected since that can interfere with TOH detection.

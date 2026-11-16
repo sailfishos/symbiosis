@@ -6,7 +6,7 @@
 
 use crate::toh::config::parse::{Exec, SystemdUnit};
 use futures::StreamExt;
-use zbus::{connection::Builder, Connection, Error};
+use zbus::{connection::Builder, fdo, Connection, Error};
 use zvariant::{OwnedObjectPath, OwnedValue, Str, Value};
 
 mod proxies {
@@ -42,6 +42,7 @@ mod proxies {
         gen_blocking = false
     )]
     pub(crate) trait Manager {
+        fn subscribe(&self) -> Result<()>;
         fn get_unit(&self, name: &str) -> Result<OwnedObjectPath>;
         fn start_transient_unit(
             &self,
@@ -138,9 +139,16 @@ impl<'p> Manager<'p> {
 
     /// Get manager for connection.
     pub async fn for_connection(connection: Connection) -> Result<Self, Error> {
-        Ok(Self {
-            proxy: proxies::ManagerProxy::new(&connection).await?,
-        })
+        let proxy = proxies::ManagerProxy::new(&connection).await?;
+        match proxy.subscribe().await {
+            Ok(()) => {}
+            Err(fdo::Error::ZBus(Error::MethodError(name, ..)))
+                if name == "org.freedesktop.systemd1.AlreadySubscribed" => {}
+            Err(error) => {
+                log::warn!("Failed to subscribe to systemd signals: {error}");
+            }
+        }
+        Ok(Self { proxy })
     }
 
     /// D-Bus connection for the manager proxy.

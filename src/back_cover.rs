@@ -9,15 +9,19 @@
 use crate::bus::I2cBus;
 use crate::i2cdev::I2cDev;
 use crate::id::{AdcValue, Id, TohId};
-use crate::interrupt::{IntState, Interrupt};
+use crate::interrupt::{IntState, Interrupt as Int};
 use crate::power::{self, Power};
 use crate::toh::*;
 use async_trait::async_trait;
+use std::convert::Infallible;
 use std::io::{self, Read, Write};
 use std::marker::PhantomData;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::time::{interval, sleep, MissedTickBehavior};
+use tokio::{
+    sync::watch,
+    time::{interval, timeout, MissedTickBehavior},
+};
 
 // Difference that is considered acceptable for attached TOH ID pin ADC values.
 const ACCEPTED_ADC_DIFFERENCE: f64 = 0.005; // 0.5 %
@@ -70,9 +74,10 @@ mod state {
 pub struct BackCover<P: state::State + std::marker::Send> {
     id: Id,
     i2c: I2cDev,
-    int: Interrupt,
+    int: Int,
     pwr: Power<power::ReadWrite>,
     bus: I2cBus,
+    channel: watch::Sender<Interrupt>,
     _state: PhantomData<P>,
 }
 
@@ -101,10 +106,11 @@ impl BackCover<state::Detached> {
         pwr.set_power(false)?;
         Ok(Self {
             id: Id::new()?,
-            int: Interrupt::new()?,
+            int: Int::new()?,
             i2c: bus.i2c_dev()?,
             pwr,
             bus,
+            channel: watch::Sender::new(Interrupt),
             _state: PhantomData,
         })
     }
@@ -120,6 +126,7 @@ impl BackCover<state::Detached> {
             int,
             pwr,
             bus,
+            channel,
             ..
         } = self;
         Ok(BackCover {
@@ -128,6 +135,7 @@ impl BackCover<state::Detached> {
             int,
             pwr,
             bus,
+            channel,
             _state: PhantomData,
         })
     }
@@ -240,6 +248,7 @@ impl BackCover<state::Attached> {
             int,
             mut pwr,
             bus,
+            channel,
             ..
         } = self;
         // TODO: Is there a better way to represent this so we don't need to spell out these all?
@@ -250,6 +259,7 @@ impl BackCover<state::Attached> {
                 int,
                 pwr,
                 bus,
+                channel,
                 _state: PhantomData::<state::PresentNoMemoryChip>,
             })),
             TohId::R10k => Ok(Variant::With256BBlocks(BackCover {
@@ -258,6 +268,7 @@ impl BackCover<state::Attached> {
                 int,
                 pwr,
                 bus,
+                channel,
                 _state: PhantomData::<state::Present256BBlocks>,
             })),
             TohId::R15k => Ok(Variant::With64kBBlocks(BackCover {
@@ -266,6 +277,7 @@ impl BackCover<state::Attached> {
                 int,
                 pwr,
                 bus,
+                channel,
                 _state: PhantomData::<state::Present64kBBlocks>,
             })),
             TohId::NotPresent => {
@@ -282,6 +294,7 @@ impl BackCover<state::Attached> {
                     int,
                     pwr,
                     bus,
+                    channel,
                     _state: PhantomData::<state::Attached>,
                 }))
             }
@@ -349,6 +362,7 @@ impl<S: state::State + std::marker::Send + state::Identifiable> PowerDown for Ba
             int,
             mut pwr,
             bus,
+            channel,
             ..
         } = self;
         pwr.set_power(false)?;
@@ -358,6 +372,7 @@ impl<S: state::State + std::marker::Send + state::Identifiable> PowerDown for Ba
             int,
             pwr,
             bus,
+            channel,
             _state: PhantomData,
         })
     }
@@ -398,8 +413,20 @@ where
                 // TOH is disconnected
                 break;
             } else {
-                // TODO: Reporting interrupts
-                sleep(Duration::from_millis(100)).await;
+                // Tell any receivers that we got an interrupt.
+                let _ = self.channel.send(Interrupt);
+                // Wait until interrupt is cleared or TOH is removed (periodic ADC checks).
+                while self.id.read()?.is_toh_present() {
+                    if timeout(Duration::from_millis(500), self.int.watch(IntState::Low))
+                        .await
+                        .ok()
+                        .transpose()?
+                        .is_some()
+                    {
+                        // INT is low again => interrupt was cleared
+                        break;
+                    }
+                }
             }
         }
         let BackCover {
@@ -408,6 +435,7 @@ where
             int,
             pwr,
             mut bus,
+            channel,
             ..
         } = self;
         bus.remove_all_targets()?;
@@ -417,6 +445,7 @@ where
             int,
             pwr,
             bus,
+            channel,
             _state: PhantomData,
         })
     }
@@ -600,5 +629,36 @@ impl<S: state::State + std::marker::Send + state::Identifiable> EnableTargetDevi
         }
         // TODO: Bind drivers
         Ok(())
+    }
+}
+
+/// Receiver for interrupts.
+///
+/// Implements [`WaitInterrupt`].
+#[derive(Debug)]
+pub struct InterruptReceiver {
+    receiver: watch::Receiver<Interrupt>,
+}
+
+#[async_trait]
+impl<S: state::State + std::marker::Send + state::Identifiable> SubscribeInterrupts
+    for BackCover<S>
+{
+    type Receiver = InterruptReceiver;
+    type Error = Infallible;
+
+    async fn subscribe_interrupts(&mut self) -> Result<Self::Receiver, Self::Error> {
+        Ok(InterruptReceiver {
+            receiver: self.channel.subscribe(),
+        })
+    }
+}
+
+#[async_trait]
+impl WaitInterrupt for InterruptReceiver {
+    type Error = watch::error::RecvError;
+
+    async fn wait_interrupt(&mut self) -> Result<Interrupt, Self::Error> {
+        self.receiver.changed().await.map(|_| Interrupt)
     }
 }

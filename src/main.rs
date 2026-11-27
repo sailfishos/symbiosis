@@ -12,8 +12,8 @@ use std::error::Error;
 use std::time::Duration;
 use symbiosis::{
     back_cover::{
-        BackCover, DetectionError, EnableTargetDevices, IdentificationError, InterruptReceiver,
-        PowerDown, Variant, WaitDisconnect,
+        BackCover, DetectionError, DisableBusPower, EnableTargetDevices, IdentificationError,
+        InterruptReceiver, PowerDown, Variant, WaitDisconnect,
     },
     dbus::server::Toh,
     toh::{Detect, IsPresent, SubscribeInterrupts},
@@ -40,6 +40,7 @@ enum LastErrorKind {
     IdentificationError,
     ChipReadingError,
     ParsingError,
+    PoweringError,
 }
 
 /// Keep count on retries per error kind.
@@ -107,6 +108,7 @@ impl LastError {
         let kind = match error {
             DetectionError::Io(_) => LastErrorKind::ChipReadingError,
             DetectionError::Parse(_) => LastErrorKind::ParsingError,
+            DetectionError::BusPower(_) => LastErrorKind::PoweringError,
         };
         self.update(kind)
     }
@@ -115,27 +117,23 @@ impl LastError {
 trait BackCoverDetect:
     WaitDisconnect
     + Detect<Error = DetectionError>
+    + DisableBusPower
     + PowerDown
     + EnableTargetDevices
     + SubscribeInterrupts<Error = Infallible, Receiver = InterruptReceiver>
 {
-    // Rust 1.86.0 gets rid of this
-    fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect>;
 }
 
 impl<
         T: WaitDisconnect
             + Detect<Error = DetectionError>
+            + DisableBusPower
             + PowerDown
             + EnableTargetDevices
             + SubscribeInterrupts<Error = Infallible, Receiver = InterruptReceiver>
             + 'static,
     > BackCoverDetect for T
 {
-    // Rust 1.86.0 gets rid of this
-    fn cast_to_wait_disconnect(self: Box<Self>) -> Box<dyn WaitDisconnect> {
-        self
-    }
 }
 
 #[derive(FromArgs)]
@@ -259,7 +257,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     // Power down if requested.
                     let back_cover: Box<dyn WaitDisconnect> =
                         if info.leave_power_on.unwrap_or(false) {
-                            back_cover.cast_to_wait_disconnect()
+                            Box::new(back_cover.disable_bus_power_boxed()?)
                         } else {
                             Box::new(back_cover.power_down_boxed()?)
                         };

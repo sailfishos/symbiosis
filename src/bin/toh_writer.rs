@@ -10,11 +10,12 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::Rem;
 use std::thread::sleep;
 use std::time::Duration;
+use tokio::{runtime::LocalRuntime, time::timeout};
 
 use symbiosis::bus::I2cBus;
 use symbiosis::id::{Id, TohId};
 use symbiosis::interrupt::{IntState, Interrupt};
-use symbiosis::power::Power;
+use symbiosis::power::{self, Power};
 
 /// TOH memory chip writer.
 ///
@@ -31,24 +32,15 @@ struct Arguments {
 }
 
 /// Wait for INT pin to become 0
-fn wait_for_int() -> Result<(), std::io::Error> {
+async fn wait_for_int() -> Result<(), std::io::Error> {
     let mut int = Interrupt::new()?;
-    let mut lock = std::io::stdout().lock();
-    write!(lock, "Waiting for INT pin to go low for up to a minute")?;
-    lock.flush()?;
-    for _ in 0..(60_000 / 500) {
-        if int.state()? == IntState::Low {
-            writeln!(lock)?;
-            return Ok(());
-        }
-        write!(lock, ".")?;
-        lock.flush()?;
-        sleep(Duration::from_millis(500));
-    }
-    Err(std::io::Error::new(
-        std::io::ErrorKind::TimedOut,
-        "TOH was not connected",
-    ))
+    println!("Waiting for INT pin to go low for up to a minute");
+    // TODO: Rust 1.89.0 would allow to use Result::flatten instead of ?
+    timeout(Duration::from_secs(60), int.watch(IntState::Low))
+        .await
+        .map_err(|_timeout| {
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "TOH was not connected")
+        })?
 }
 
 /// Test ADC for the right type of chip and get address size in bytes
@@ -74,17 +66,17 @@ fn with_power<F: FnOnce() -> Result<(), Box<dyn std::error::Error>>>(
     f: F,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut power = Power::new()?;
-    power.set_power(true)?;
+    power.request_state(power::State::Bus)?;
     println!("Power enabled");
     sleep(Duration::from_millis(100));
 
     let result = f();
 
     if result.is_ok() {
-        power.set_power(false)?;
+        power.request_state(power::State::Off)?;
         println!("Power disabled");
     } else {
-        let _ = power.set_power(false);
+        let _ = power.request_state(power::State::Off);
     }
 
     result
@@ -268,7 +260,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Arguments = argh::from_env();
     // TODO: This could also use a yaml file in the same format as create_toh_bin.
     let mut file = File::open(args.input_file)?;
-    wait_for_int()?;
+    // We need tokio only for this small bit
+    LocalRuntime::new()?.block_on(wait_for_int())?;
     let address_size = get_address_size()?;
     with_power(|| {
         let mut i2c = I2cBus::toh_bus()?;

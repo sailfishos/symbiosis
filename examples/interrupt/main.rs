@@ -8,7 +8,6 @@
 
 use argh::FromArgs;
 use symbiosis::toh::*;
-use zbus::fdo::Error as DBusError;
 
 #[derive(FromArgs)]
 #[argh(
@@ -39,15 +38,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         },
-        Err(DBus(DBusError::UnknownObject(..))) => {
-            Err("TOH is not present or is of unsupported type".into())
-        }
-        Err(DBus(DBusError::ServiceUnknown(..))) => Err("TOH daemon is not running".into()),
+        Err(Common(error)) => Err(error.to_string().into()),
         Err(Subscribe(SubscribeError::AccessDenied)) => {
             Err("Access denied, please configure TOH daemon".into())
         }
         Err(Subscribe(error)) => Err(format!("Subscribe error: {error:?}").into()),
-        Err(DBus(error)) => Err(format!("D-Bus error: {error:?}").into()),
         Err(Io(error)) => Err(format!("IO error: {error}").into()),
     }
 }

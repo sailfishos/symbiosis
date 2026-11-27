@@ -4,7 +4,7 @@
 
 //! I2cDev loan management.
 
-use crate::power::Power;
+use crate::power::{self, Power};
 use futures::StreamExt;
 use std::io;
 use std::sync::Arc;
@@ -34,18 +34,23 @@ pub(crate) struct Loan {
 impl Loan {
     /// Creates loan and enables power until [`end`](Self::end) is called.
     async fn new(owner: UniqueName<'static>, power_down: bool) -> io::Result<Self> {
-        Power::new().and_then(|mut pwr| pwr.set_power(true))?;
+        Power::new()
+            .and_then(|mut pwr| pwr.request_state(power::State::Bus).map_err(|e| e.into()))?;
         sleep(Duration::from_millis(100)).await;
         Ok(Self { owner, power_down })
     }
 
     /// Ends the loan and turns off power.
     pub fn end(self) -> io::Result<()> {
-        if self.power_down {
-            Power::new().and_then(|mut pwr| pwr.set_power(false))
-        } else {
-            Ok(())
-        }
+        Power::new().and_then(|mut pwr| {
+            pwr.request_state(if self.power_down {
+                power::State::Off
+            } else {
+                power::State::Out
+            })
+            .map_err(|e| e.into())
+        })?;
+        Ok(())
     }
 }
 

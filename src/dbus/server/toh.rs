@@ -222,7 +222,8 @@ impl Toh {
 
     /// Return i2c-dev access to the I²C bus.
     ///
-    /// Also powers down the TOH.
+    /// Also powers down the TOH unless power was requested to be left on or blocked by kernel.
+    /// Always powers down the bus unless blocked by kernel.
     ///
     /// Only available to the process that had borrowed the access.
     async fn return_i2c_dev_access(

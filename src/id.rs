@@ -4,11 +4,12 @@
 
 //! ID pin handling, ADC and all that stuff.
 
-use crate::back_cover::paths::ADC_PATH;
+use crate::attr::{Attribute, Read};
 use derive_more::Into;
-use std::fs::File;
-use std::io::{self, ErrorKind, Seek};
+use std::io::{self, ErrorKind};
 use std::ops::Sub;
+
+const ADC_PATH: &str = "/sys/devices/platform/toh_connector/id_voltage_mv";
 
 /// Identified TOH types according to read ADC value.
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -67,7 +68,7 @@ impl Sub for AdcValue {
 
 /// ID pin state.
 pub struct Id {
-    file: File,
+    attr: Attribute<Read>,
 }
 
 impl Id {
@@ -76,15 +77,15 @@ impl Id {
     /// This uses the device file directly.
     pub fn new() -> std::io::Result<Self> {
         Ok(Self {
-            file: File::open(ADC_PATH)?,
+            attr: Attribute::readable(ADC_PATH)?,
         })
     }
 
     /// Read the current ID pin state with ADC.
     pub fn read(&mut self) -> std::io::Result<AdcValue> {
-        self.file.rewind()?;
         Ok(AdcValue(
-            io::read_to_string(&self.file)?
+            self.attr
+                .read_to_string()?
                 .trim_end()
                 .parse::<u16>()
                 .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?,

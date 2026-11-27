@@ -12,7 +12,8 @@ mod value;
 
 pub use crate::dbus::error::{BorrowError, ReturnError, SubscribeError};
 pub use client::{
-    FetchingInfoError, InterruptSubscription, SubscribeInterruptsError, Toh, WaitInterruptError,
+    CommonError, FetchingInfoError, InterruptSubscription, SubscribeInterruptsError, Toh,
+    WaitInterruptError,
 };
 pub use config::{ConfigError, Configs, Devices, Overrides, Units};
 pub use info::*;

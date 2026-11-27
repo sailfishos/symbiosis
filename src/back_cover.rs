@@ -10,7 +10,7 @@ use crate::bus::I2cBus;
 use crate::i2cdev::I2cDev;
 use crate::id::{AdcValue, Id, TohId};
 use crate::interrupt::{IntState, Interrupt as Int};
-use crate::power::{self, Power};
+use crate::power::{self, Power, PowerStateRequestError};
 use crate::toh::*;
 use async_trait::async_trait;
 use std::convert::Infallible;
@@ -26,15 +26,10 @@ use tokio::{
 // Difference that is considered acceptable for attached TOH ID pin ADC values.
 const ACCEPTED_ADC_DIFFERENCE: f64 = 0.005; // 0.5 %
 
-pub(crate) mod paths {
-    pub(crate) const PWR_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_5v_out_state";
-    pub(crate) const ADC_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_adc_value";
-    pub(crate) const INT_PATH: &str = "/sys/class/yft_pogo_pin/yft_pogo_pin_int_state";
-}
-
 mod state {
     pub trait State {}
     pub trait Identifiable {}
+    pub trait Powered {}
 
     /// TOH was not detected.
     ///
@@ -59,15 +54,24 @@ mod state {
     /// No memory chip to read.
     pub struct PresentNoMemoryChip {}
 
+    /// TOH has been identified and needs to be power cycled to identfy again.
+    pub struct Identified {}
+
     impl State for Detached {}
     impl State for Attached {}
     impl State for Present256BBlocks {}
     impl State for Present64kBBlocks {}
     impl State for PresentNoMemoryChip {}
+    impl State for Identified {}
 
     impl Identifiable for Present256BBlocks {}
     impl Identifiable for Present64kBBlocks {}
     impl Identifiable for PresentNoMemoryChip {}
+
+    impl Powered for Present256BBlocks {}
+    impl Powered for Present64kBBlocks {}
+    impl Powered for PresentNoMemoryChip {}
+    impl Powered for Identified {}
 }
 
 /// TOH implementation that talks via I²C and GPIO.
@@ -101,9 +105,8 @@ impl BackCover<state::Detached> {
     /// Requires _root_ access and thus is mainly only good for the daemon.
     pub fn new() -> io::Result<Self> {
         let bus = I2cBus::toh_bus()?;
-        // TODO: Handle also the buffer chip power
         let mut pwr = Power::new()?;
-        pwr.set_power(false)?;
+        pwr.request_state(power::State::Off)?;
         Ok(Self {
             id: Id::new()?,
             int: Int::new()?,
@@ -152,6 +155,9 @@ pub enum IdentificationError {
     /// IO error while reading ADC.
     #[error("IO error while reading ADC: {0}")]
     AdcIo(io::Error),
+    /// Error while setting bus power.
+    #[error("Power request error: {0}")]
+    PowerStateRequest(#[from] PowerStateRequestError),
     /// Cover got removed before identification.
     #[error("Cover disconnected")]
     Disconnected,
@@ -205,6 +211,10 @@ impl id::IdResistor for BackCover<state::PresentNoMemoryChip> {
     const ID: TohId = TohId::R6k2;
 }
 
+impl id::IdResistor for BackCover<state::Identified> {
+    const ID: TohId = TohId::Unknown;
+}
+
 impl<S: state::State + std::marker::Send> BackCover<S>
 where
     BackCover<S>: id::IdResistor,
@@ -234,11 +244,11 @@ impl BackCover<state::Attached> {
     /// Returns an error if TOH is not present or cannot be identified.
     pub async fn power_up(mut self) -> Result<Variant, IdentificationError> {
         // TODO: Could we have some guard type for power?
-        self.pwr.set_power(true)?;
+        self.pwr.request_state(power::State::Bus)?;
         let adc = self.read_adc().await?;
         if self.read_int_state()? != IntState::Low {
             // INT got disconnected => TOH is no longer present.
-            self.pwr.set_power(false)?;
+            self.pwr.request_state(power::State::Off)?;
             return Err(IdentificationError::Disconnected);
         }
 
@@ -282,12 +292,12 @@ impl BackCover<state::Attached> {
             })),
             TohId::NotPresent => {
                 // INT pin claims that there is a cover but no resistor was found.
-                pwr.set_power(false)?;
+                pwr.request_state(power::State::Off)?;
                 Err(IdentificationError::IdResistorNotDetected)
             }
             TohId::Unknown => {
                 // Unsupported type.
-                pwr.set_power(false)?;
+                pwr.request_state(power::State::Off)?;
                 Ok(Variant::Attached(BackCover {
                     id,
                     i2c,
@@ -354,7 +364,7 @@ pub trait PowerDown {
     fn power_down_boxed(self: Box<Self>) -> io::Result<BackCover<state::Attached>>;
 }
 
-impl<S: state::State + std::marker::Send + state::Identifiable> PowerDown for BackCover<S> {
+impl<S: state::State + std::marker::Send + state::Powered> PowerDown for BackCover<S> {
     fn power_down(self) -> io::Result<BackCover<state::Attached>> {
         let BackCover {
             id,
@@ -365,7 +375,7 @@ impl<S: state::State + std::marker::Send + state::Identifiable> PowerDown for Ba
             channel,
             ..
         } = self;
-        pwr.set_power(false)?;
+        pwr.request_state(power::State::Off)?;
         Ok(BackCover {
             id,
             i2c,
@@ -379,6 +389,44 @@ impl<S: state::State + std::marker::Send + state::Identifiable> PowerDown for Ba
 
     fn power_down_boxed(self: Box<Self>) -> io::Result<BackCover<state::Attached>> {
         self.power_down()
+    }
+}
+
+/// Trait for [`disable_bus_power`](Self::disable_bus_power) method.
+pub trait DisableBusPower {
+    /// Disable bus power but leave power output enabled.
+    fn disable_bus_power(self) -> io::Result<BackCover<state::Identified>>;
+
+    // NB: Just to workaround some inconveniences in Rust.
+    /// Disable bus power but leave power output enabled.
+    fn disable_bus_power_boxed(self: Box<Self>) -> io::Result<BackCover<state::Identified>>;
+}
+
+impl<S: state::State + std::marker::Send + state::Identifiable> DisableBusPower for BackCover<S> {
+    fn disable_bus_power(self) -> io::Result<BackCover<state::Identified>> {
+        let BackCover {
+            id,
+            i2c,
+            int,
+            mut pwr,
+            bus,
+            channel,
+            ..
+        } = self;
+        pwr.request_state(power::State::Out)?;
+        Ok(BackCover {
+            id,
+            i2c,
+            int,
+            pwr,
+            bus,
+            channel,
+            _state: PhantomData,
+        })
+    }
+
+    fn disable_bus_power_boxed(self: Box<Self>) -> io::Result<BackCover<state::Identified>> {
+        self.disable_bus_power()
     }
 }
 
@@ -568,6 +616,9 @@ pub enum DetectionError {
     /// Parsing error happened.
     #[error("Parsing error: {0}")]
     Parse(#[from] ParseError),
+    /// Powering bus up or down failed.
+    #[error("Error while setting bus power: {0}")]
+    BusPower(#[from] PowerStateRequestError),
 }
 
 #[async_trait]

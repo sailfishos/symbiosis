@@ -24,7 +24,6 @@ Future work
 The important known missing parts are:
 
 - Loading, unloading, binding and unbinding drivers for TOHs.
-- Proper interrupt handling for TOH interrupt pin.
 - Package installation when a new TOH is attached.
 
 Additionally there are many TODOs to implement all around the code base.
